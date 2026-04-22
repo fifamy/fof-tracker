@@ -1,5 +1,5 @@
 window.__FOF_TRACKER_SNAPSHOT__ = {
-  "generated_at": "2026-04-20 09:30:00",
+  "generated_at": "2026-04-22 14:38:14",
   "as_of_date": "2026-04-19",
   "config": {
     "project_name": "公募FOF基金跟踪系统",

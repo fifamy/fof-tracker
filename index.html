@@ -8,7 +8,7 @@
       name="description"
       content="跟踪全市场公募FOF的申报、受理、获批、发行、成立情况，并支持重点基金公司竞争格局观察。"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260417-chase1" />
+    <link rel="stylesheet" href="./styles.css?v=20260422-intel1" />
   </head>
   <body>
     <div class="shell">
@@ -17,12 +17,17 @@
           <div class="brand-card">
             <div class="brand-kicker">Public FOF Tracker</div>
             <h1>公募FOF基金跟踪系统</h1>
-            <p id="hero-subtitle">为产品经理设计的全市场 FOF 周跟踪面板。</p>
+            <p id="hero-subtitle">为产品经理设计的全市场 FOF 竞品情报监控台。</p>
             <div class="brand-pills" id="hero-pills"></div>
           </div>
 
           <div class="rail-card">
-            <div class="rail-title">在审产品池</div>
+            <div class="rail-title">监控导航</div>
+            <div id="rail-nav"></div>
+          </div>
+
+          <div class="rail-card">
+            <div class="rail-title">盯盘焦点</div>
             <div id="in-review-pool"></div>
           </div>
         </aside>
@@ -46,25 +51,45 @@
           <section class="panel is-active" id="panel-overview">
             <div class="kpi-grid" id="kpi-grid"></div>
 
-            <div class="pipeline-card">
+            <div class="card">
               <div class="section-head">
                 <div>
-                  <h2>当前全市场流程分布</h2>
-                  <p>以每只产品当前最新阶段为准，按申报、受理、获批、成立四段观察节奏。</p>
+                  <h2>华夏 vs 头部机构全景大盘</h2>
+                  <p>把发行水位、产品矩阵和审批效率压缩到一块宏观监控区，先看方向，再看单品。</p>
                 </div>
+                <div class="subtabs" id="battlefield-tabs"></div>
               </div>
-              <div class="pipeline-grid" id="pipeline-grid"></div>
+              <div id="battlefield-content"></div>
             </div>
 
             <div class="overview-layout">
-              <section class="stage-board">
+              <section class="card stage-board">
                 <div class="section-head">
                   <div>
-                    <h2>阶段动态概览</h2>
-                    <p>对应申报、受理、获批、成立四个阶段的新增产品。</p>
+                    <h2>新申报与在审情报雷达</h2>
+                    <p>默认盯紧新申报，也可以切到全部在审；支持搜索、公司筛选和优先级排序。</p>
                   </div>
                 </div>
-                <div id="stage-sections"></div>
+                <div class="monitor-toolbar">
+                  <label>
+                    <span>全局搜索</span>
+                    <input id="monitor-search" type="text" placeholder="基金名称 / 公司 / 标签" />
+                  </label>
+                  <label>
+                    <span>基金公司</span>
+                    <select id="monitor-company"></select>
+                  </label>
+                  <label>
+                    <span>当前阶段</span>
+                    <select id="monitor-stage"></select>
+                  </label>
+                  <label>
+                    <span>排序方式</span>
+                    <select id="monitor-sort"></select>
+                  </label>
+                </div>
+                <div class="monitor-summary" id="signal-summary"></div>
+                <div id="signal-radar"></div>
               </section>
 
               <section class="trend-board">
@@ -77,8 +102,37 @@
                   </div>
                   <div id="trend-chart"></div>
                 </div>
+                <div class="card">
+                  <div class="section-head compact">
+                    <div>
+                      <h2>重点异动与华夏对标</h2>
+                      <p>把本期值得点开的卡片优先抬出来。</p>
+                    </div>
+                  </div>
+                  <div id="key-products"></div>
+                </div>
               </section>
             </div>
+
+            <div class="pipeline-card">
+              <div class="section-head">
+                <div>
+                  <h2>当前全市场流程分布</h2>
+                  <p>以每只产品当前最新阶段为准，按申报、受理、获批、发行、成立五段观察节奏。</p>
+                </div>
+              </div>
+              <div class="pipeline-grid" id="pipeline-grid"></div>
+            </div>
+
+            <section class="stage-board">
+              <div class="section-head">
+                <div>
+                  <h2>阶段动态概览</h2>
+                  <p>对应申报、受理、获批、成立四个阶段的新增产品明细，便于列表化复核。</p>
+                </div>
+              </div>
+              <div id="stage-sections"></div>
+            </section>
           </section>
 
           <section class="panel" id="panel-tracker">
@@ -227,7 +281,19 @@
       </div>
     </div>
 
+    <div class="drawer-backdrop" id="drawer-backdrop"></div>
+    <aside class="detail-drawer" id="detail-drawer" aria-hidden="true">
+      <div class="drawer-head">
+        <div>
+          <div class="brand-kicker">Competitive Intelligence Drawer</div>
+          <h2>单品穿透诊断</h2>
+        </div>
+        <button class="drawer-close" id="drawer-close" type="button">关闭</button>
+      </div>
+      <div class="drawer-body" id="drawer-content"></div>
+    </aside>
+
     <script src="./data/fof_tracker_snapshot.js?v=20260417-chase1"></script>
-    <script src="./app.js?v=20260417-chase1"></script>
+    <script src="./app.js?v=20260422-intel1"></script>
   </body>
 </html>
