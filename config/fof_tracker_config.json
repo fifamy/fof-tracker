@@ -1,0 +1,31 @@
+{
+  "project_name": "公募FOF基金跟踪系统",
+  "as_of_date": "2026-04-14",
+  "key_companies": [
+    "华夏",
+    "富国",
+    "易方达",
+    "国泰",
+    "景顺长城",
+    "汇添富",
+    "博时"
+  ],
+  "stage_order": [
+    "新申报",
+    "新受理",
+    "已获批",
+    "发行中",
+    "已成立"
+  ],
+  "fof_type_mapping": {
+    "retirement_keywords": [
+      "养老"
+    ],
+    "etf_fof_keywords": [
+      "ETF-FOF",
+      "ETF FOF",
+      "ETFFOF",
+      "ETFFOF"
+    ]
+  }
+}

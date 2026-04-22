@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>公募FOF基金跟踪系统</title>
+    <meta
+      name="description"
+      content="跟踪全市场公募FOF的申报、受理、获批、发行、成立情况，并支持重点基金公司竞争格局观察。"
+    />
+    <link rel="stylesheet" href="./styles.css?v=20260417-chase1" />
+  </head>
+  <body>
+    <div class="shell">
+      <div class="page-grid">
+        <aside class="brand-rail">
+          <div class="brand-card">
+            <div class="brand-kicker">Public FOF Tracker</div>
+            <h1>公募FOF基金跟踪系统</h1>
+            <p id="hero-subtitle">为产品经理设计的全市场 FOF 周跟踪面板。</p>
+            <div class="brand-pills" id="hero-pills"></div>
+          </div>
+
+          <div class="rail-card">
+            <div class="rail-title">在审产品池</div>
+            <div id="in-review-pool"></div>
+          </div>
+        </aside>
+
+        <main class="main">
+          <section class="toolbar">
+            <div class="time-toggle" id="top-period-toggle">
+              <button class="chip is-active" data-period="week">近一周</button>
+              <button class="chip" data-period="ytd">今年以来</button>
+            </div>
+            <div class="tab-toggle" id="main-tabs">
+              <button class="tab is-active" data-tab="overview">首页总览</button>
+              <button class="tab" data-tab="tracker">流程跟踪</button>
+              <button class="tab" data-tab="companies">公司竞争格局</button>
+              <button class="tab" data-tab="key">重点公司对比</button>
+              <button class="tab" data-tab="chase">华夏追赶测算</button>
+              <button class="tab" data-tab="detail">产品详情</button>
+            </div>
+          </section>
+
+          <section class="panel is-active" id="panel-overview">
+            <div class="kpi-grid" id="kpi-grid"></div>
+
+            <div class="pipeline-card">
+              <div class="section-head">
+                <div>
+                  <h2>当前全市场流程分布</h2>
+                  <p>以每只产品当前最新阶段为准，按申报、受理、获批、成立四段观察节奏。</p>
+                </div>
+              </div>
+              <div class="pipeline-grid" id="pipeline-grid"></div>
+            </div>
+
+            <div class="overview-layout">
+              <section class="stage-board">
+                <div class="section-head">
+                  <div>
+                    <h2>阶段动态概览</h2>
+                    <p>对应申报、受理、获批、成立四个阶段的新增产品。</p>
+                  </div>
+                </div>
+                <div id="stage-sections"></div>
+              </section>
+
+              <section class="trend-board">
+                <div class="card">
+                  <div class="section-head compact">
+                    <div>
+                      <h2>近8周成立与募集趋势</h2>
+                      <p>看近期成立数量与募集规模变化。</p>
+                    </div>
+                  </div>
+                  <div id="trend-chart"></div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-tracker">
+            <div class="card">
+              <div class="section-head">
+                <div>
+                  <h2>流程跟踪总表</h2>
+                  <p>支持按公司、类型、状态、重点公司和关键词筛选。</p>
+                </div>
+              </div>
+              <div class="filters-grid">
+                <label>
+                  <span>时间范围</span>
+                  <select id="tracker-period">
+                    <option value="all">全部</option>
+                    <option value="week">近一周</option>
+                    <option value="ytd">今年以来</option>
+                  </select>
+                </label>
+                <label>
+                  <span>基金公司</span>
+                  <select id="tracker-company"></select>
+                </label>
+                <label>
+                  <span>FOF类型</span>
+                  <select id="tracker-type"></select>
+                </label>
+                <label>
+                  <span>当前状态</span>
+                  <select id="tracker-stage"></select>
+                </label>
+                <label>
+                  <span>关键词</span>
+                  <input id="tracker-keyword" type="text" placeholder="基金名称 / 公司" />
+                </label>
+                <label class="checkline">
+                  <input id="tracker-key-only" type="checkbox" />
+                  <span>仅看重点公司</span>
+                </label>
+              </div>
+              <div class="table-wrap" id="tracker-table"></div>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-companies">
+            <div class="card">
+              <div class="section-head">
+                <div>
+                  <h2>公司竞争格局</h2>
+                  <p>按近一周和今年以来跟踪基金公司动作与成立表现。</p>
+                </div>
+              </div>
+              <div class="inline-actions">
+                <div class="toggle-group">
+                  <div class="toggle-label">时间维度</div>
+                  <div class="subtabs" id="company-period-toggle">
+                    <button class="subtab is-active" data-period="week">近一周</button>
+                    <button class="subtab" data-period="ytd">今年以来</button>
+                  </div>
+                </div>
+                <div class="toggle-group">
+                  <div class="toggle-label">公司范围</div>
+                  <div class="subtabs" id="company-scope-toggle">
+                    <button class="subtab is-active" data-scope="all">全市场</button>
+                    <button class="subtab is-key" data-scope="key">重点公司</button>
+                  </div>
+                </div>
+              </div>
+              <div class="table-wrap" id="company-table"></div>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-key">
+            <div class="section-head">
+              <div>
+                <h2>重点公司对比</h2>
+                <p>基于配置名单，重点观察近一周动作、今年以来推进节奏与在审储备。</p>
+              </div>
+            </div>
+            <div class="card">
+              <div class="section-head">
+                <div>
+                  <h2>重点公司申报审批发行节奏</h2>
+                  <p>按今年以来口径，对比华夏与重点公司在 FOF 申报、受理、获批、发行上的推进节奏。</p>
+                </div>
+              </div>
+              <div id="key-company-progress"></div>
+            </div>
+            <div class="company-card-grid" id="key-company-cards"></div>
+          </section>
+
+          <section class="panel" id="panel-chase">
+            <div class="section-head">
+              <div>
+                <h2>华夏追赶头部前三测算</h2>
+                <p>按“今年已成立 + 当前在途”为年底保底数量，反推华夏进入行业前三所需的新增申报量与最晚申报时点。</p>
+              </div>
+            </div>
+            <div class="kpi-grid chase-kpi-grid" id="chase-kpi-grid"></div>
+            <div class="card chase-brief" id="chase-brief"></div>
+            <div class="chase-layout">
+              <div class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>头部公司数量差距</h2>
+                    <p>按年底保底数量排序，直接看华夏与头部公司的数量和规模差距。</p>
+                  </div>
+                </div>
+                <div id="chase-raceboard"></div>
+              </div>
+              <div class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>华夏现有储备与测算假设</h2>
+                    <p>列示华夏当前在途产品，并说明追赶测算的核心假设。</p>
+                  </div>
+                </div>
+                <div id="chase-context"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="section-head">
+                <div>
+                  <h2>头部公司明细表</h2>
+                  <p>查看已成立数、在途数、年底保底数、募集规模及平均申报到成立耗时。</p>
+                </div>
+              </div>
+              <div class="table-wrap" id="chase-table"></div>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-detail">
+            <div class="detail-layout">
+              <div class="card detail-main">
+                <div class="section-head">
+                  <div>
+                    <h2>产品详情</h2>
+                    <p>点击任意产品后，在这里查看完整推进链路和耗时。</p>
+                  </div>
+                </div>
+                <div id="detail-content"></div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="./data/fof_tracker_snapshot.js?v=20260417-chase1"></script>
+    <script src="./app.js?v=20260417-chase1"></script>
+  </body>
+</html>
