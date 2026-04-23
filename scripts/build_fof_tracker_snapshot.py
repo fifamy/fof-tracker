@@ -16,6 +16,7 @@
 import argparse
 import hashlib
 import json
+import re
 import warnings
 from collections import OrderedDict
 from datetime import timedelta
@@ -37,6 +38,7 @@ DEFAULT_JSON = ROOT / "data" / "fof_tracker_snapshot.json"
 DEFAULT_JS = ROOT / "data" / "fof_tracker_snapshot.js"
 DEFAULT_CSV = ROOT / "data" / "fof_tracker_detail.csv"
 DEFAULT_TEMPLATE = ROOT / "data" / "fof_stage_source_template.csv"
+DEFAULT_PROFILE_FILE = ROOT / "fund_profile_20260331.xlsx"
 
 DEFAULT_DECLARE_FILE = ROOT / "全行业新基金申报统计 (3).xlsx"
 DEFAULT_ISSUE_FILE = ROOT / "基金发行统计_募集.xlsx"
@@ -49,6 +51,7 @@ FILE_MATCH_RULES = {
     "issue": [["基金发行统计", "募集"]],
     "establish": [["基金发行统计", "成立"]],
     "approval": [["基金获批情况统计", "万得"], ["基金获批情况统计"]],
+    "profile": [["fundprofile"], ["fund", "profile"]],
 }
 
 STAGE_ORDER = [
@@ -89,6 +92,7 @@ def parse_args():
     parser.add_argument("--issue-file", default=str(DEFAULT_ISSUE_FILE), help="发行募集 Excel")
     parser.add_argument("--establish-file", default=str(DEFAULT_ESTABLISH_FILE), help="成立统计 Excel")
     parser.add_argument("--approval-file", default=str(DEFAULT_APPROVAL_FILE), help="获批统计 Excel")
+    parser.add_argument("--profile-file", default=str(DEFAULT_PROFILE_FILE), help="基金画像 / 最新规模 Excel")
     parser.add_argument("--csrc-progress-api", default=str(DEFAULT_CSRC_PROGRESS_API), help="证监会公开审批进度接口")
     parser.add_argument("--web-recent-days", type=int, default=62, help="网页补充数据抓取近多少天，默认62天")
     parser.add_argument("--web-page-size", type=int, default=200, help="网页补充数据单页大小，默认200")
@@ -189,6 +193,14 @@ def format_date(value):
     if value is None or pd.isnull(value):
         return None
     return pd.Timestamp(value).strftime("%Y-%m-%d")
+
+
+def parse_date_from_text(value):
+    text = safe_text(value)
+    match = re.search(r"(\d{4})[-/]?(\d{2})[-/]?(\d{2})", text)
+    if not match:
+        return pd.NaT
+    return pd.Timestamp("%s-%s-%s" % (match.group(1), match.group(2), match.group(3)))
 
 
 def normalize_company_name(name):
@@ -557,6 +569,100 @@ def load_template_data(path, config):
     return df
 
 
+def detect_fund_profile_sheet(path):
+    workbook = pd.ExcelFile(str(path))
+    for sheet_name in workbook.sheet_names:
+        if "基金画像" in safe_text(sheet_name):
+            return workbook, sheet_name
+    return workbook, workbook.sheet_names[0]
+
+
+def detect_latest_profile_columns(columns):
+    scale_candidates = []
+    repaired_candidates = []
+    for col in columns:
+        col_text = safe_text(col)
+        parsed_date = parse_date_from_text(col_text)
+        if "基金规模合计" in col_text and "交易日期" in col_text and pd.notnull(parsed_date):
+            scale_candidates.append((parsed_date, col))
+        if "是否缺失最新规模数据" in col_text:
+            repaired_candidates.append((parsed_date, col))
+
+    if not scale_candidates:
+        raise ValueError("基金画像表中未识别到“基金规模合计[交易日期]”列")
+
+    scale_candidates = sorted(scale_candidates, key=lambda x: x[0], reverse=True)
+    latest_scale_date, latest_scale_col = scale_candidates[0]
+    prev_scale_col = scale_candidates[1][1] if len(scale_candidates) > 1 else None
+    prev_scale_date = scale_candidates[1][0] if len(scale_candidates) > 1 else pd.NaT
+
+    repaired_col = None
+    repaired_candidates = [item for item in repaired_candidates if pd.notnull(item[0])]
+    if repaired_candidates:
+        repaired_candidates = sorted(repaired_candidates, key=lambda x: x[0], reverse=True)
+        repaired_col = repaired_candidates[0][1]
+
+    return latest_scale_col, latest_scale_date, prev_scale_col, prev_scale_date, repaired_col
+
+
+def load_fund_profile_data(path):
+    workbook, sheet_name = detect_fund_profile_sheet(path)
+    df = pd.read_excel(workbook, sheet_name=sheet_name)
+    latest_scale_col, latest_scale_date, prev_scale_col, prev_scale_date, repaired_col = detect_latest_profile_columns(df.columns)
+
+    rename_map = {
+        "证券代码": "security_code",
+        "证券简称": "fund_name",
+        "基金全称": "fund_full_name",
+        "基金成立日": "fund_establish_date",
+        "基金管理人": "fund_company_raw",
+        "投资类型(一级分类)": "type1",
+        "投资类型(二级分类)": "type2",
+        "研发类型": "rd_type",
+    }
+    df = df.rename(columns=rename_map)
+    for col in rename_map.values():
+        if col not in df.columns:
+            df[col] = None
+
+    df["rd_type"] = df["rd_type"].apply(safe_text)
+    df = df[df["rd_type"].isin(["FOF", "FOF-养老"])].copy()
+    df["security_code"] = df["security_code"].apply(safe_text)
+    df["fund_name"] = df["fund_name"].apply(safe_text)
+    df["fund_full_name"] = df["fund_full_name"].apply(safe_text)
+    df["fund_company_raw"] = df["fund_company_raw"].apply(safe_text)
+    df["fund_company"] = df["fund_company_raw"].apply(normalize_company_name)
+    df["fof_type"] = df["rd_type"].apply(lambda x: "养老FOF" if "养老" in safe_text(x) else "普通FOF")
+    df["latest_scale"] = pd.to_numeric(df[latest_scale_col], errors="coerce")
+    if prev_scale_col is None:
+        df["prev_scale"] = None
+    else:
+        df["prev_scale"] = pd.to_numeric(df[prev_scale_col], errors="coerce")
+    if repaired_col is None:
+        df["is_repaired_scale"] = False
+    else:
+        df["is_repaired_scale"] = df[repaired_col].fillna(0).apply(lambda x: str(x).strip() in ("1", "1.0", "True", "true"))
+
+    df = df[
+        [
+            "security_code",
+            "fund_name",
+            "fund_full_name",
+            "fund_company",
+            "fof_type",
+            "rd_type",
+            "latest_scale",
+            "prev_scale",
+            "is_repaired_scale",
+        ]
+    ].copy()
+    return df, {
+        "sheet_name": sheet_name,
+        "scale_as_of_date": format_date(latest_scale_date),
+        "prev_scale_as_of_date": format_date(prev_scale_date),
+    }
+
+
 def infer_fof_type(raw_type, fund_name, config):
     type_text = safe_text(raw_type)
     if type_text:
@@ -593,6 +699,28 @@ def blank_record():
         "declare_to_accept_days": None,
         "accept_to_approval_days": None,
         "issue_to_establish_days": None,
+    }
+
+
+def serialize_profile_record(row):
+    latest_scale = row.get("latest_scale")
+    prev_scale = row.get("prev_scale")
+    if prev_scale is None or pd.isnull(prev_scale):
+        scale_change = None
+    elif latest_scale is None or pd.isnull(latest_scale):
+        scale_change = None
+    else:
+        scale_change = round(float(latest_scale) - float(prev_scale), 2)
+    return {
+        "security_code": safe_text(row.get("security_code")) or None,
+        "fund_name": safe_text(row.get("fund_name")) or safe_text(row.get("fund_full_name")) or None,
+        "fund_full_name": safe_text(row.get("fund_full_name")) or None,
+        "fund_company": safe_text(row.get("fund_company")) or None,
+        "fof_type": safe_text(row.get("fof_type")) or None,
+        "latest_scale": None if latest_scale is None or pd.isnull(latest_scale) else round(float(latest_scale), 2),
+        "prev_scale": None if prev_scale is None or pd.isnull(prev_scale) else round(float(prev_scale), 2),
+        "scale_change": scale_change,
+        "is_repaired_scale": bool(row.get("is_repaired_scale")),
     }
 
 
@@ -1014,7 +1142,172 @@ def serialize_record(row):
     return data
 
 
-def build_snapshot(products, config, as_of_date):
+def build_fof_scale_profile(profile_df, config, meta, source_file, focus_company="华夏", top_n=3, head_limit=8):
+    if profile_df is None or profile_df.empty:
+        return None
+
+    df = profile_df.copy()
+    total_latest_scale = float(df["latest_scale"].fillna(0).sum())
+    total_prev_scale = float(df["prev_scale"].fillna(0).sum())
+    total_scale_change = total_latest_scale - total_prev_scale
+
+    company_rows = []
+    for company, sub in df.groupby("fund_company"):
+        company_name = safe_text(company)
+        if company_name == "":
+            continue
+        latest_scale_sum = float(sub["latest_scale"].fillna(0).sum())
+        prev_scale_sum = float(sub["prev_scale"].fillna(0).sum())
+        latest_valid = sub["latest_scale"].dropna()
+        ordered_products = sub.sort_values(["latest_scale", "fund_name"], ascending=[False, True]).head(3)
+        company_rows.append({
+            "fund_company": company_name,
+            "product_count": int(len(sub)),
+            "ordinary_count": int((sub["fof_type"] == "普通FOF").sum()),
+            "pension_count": int((sub["fof_type"] == "养老FOF").sum()),
+            "latest_scale_sum": round(latest_scale_sum, 2),
+            "prev_scale_sum": round(prev_scale_sum, 2),
+            "scale_change": round(latest_scale_sum - prev_scale_sum, 2),
+            "avg_latest_scale": round(float(latest_valid.mean()), 2) if len(latest_valid) > 0 else None,
+            "max_product_scale": round(float(latest_valid.max()), 2) if len(latest_valid) > 0 else None,
+            "scale_share_pct": round((latest_scale_sum / total_latest_scale) * 100, 2) if total_latest_scale > 0 else None,
+            "repaired_scale_count": int(sub["is_repaired_scale"].fillna(False).sum()),
+            "is_focus_company": company_name == focus_company,
+            "is_key_company": company_name in config.get("key_companies", []),
+            "top_products": [serialize_profile_record(r) for _, r in ordered_products.iterrows()],
+        })
+
+    company_rows = sorted(company_rows, key=lambda x: (x["latest_scale_sum"], x["product_count"]), reverse=True)
+    for idx, row in enumerate(company_rows, start=1):
+        row["rank"] = idx
+
+    company_map = {row["fund_company"]: row for row in company_rows}
+    focus_row = company_map.get(focus_company)
+    if focus_row is None:
+        focus_row = {
+            "rank": len(company_rows) + 1,
+            "fund_company": focus_company,
+            "product_count": 0,
+            "ordinary_count": 0,
+            "pension_count": 0,
+            "latest_scale_sum": 0.0,
+            "prev_scale_sum": 0.0,
+            "scale_change": 0.0,
+            "avg_latest_scale": None,
+            "max_product_scale": None,
+            "scale_share_pct": 0.0,
+            "repaired_scale_count": 0,
+            "is_focus_company": True,
+            "is_key_company": True,
+            "top_products": [],
+        }
+
+    target_rows = company_rows[:top_n] if len(company_rows) >= top_n else company_rows[:]
+    threshold_row = target_rows[-1] if target_rows else focus_row
+    head_rows = company_rows[:head_limit]
+    if not any(row["fund_company"] == focus_company for row in head_rows):
+        head_rows = head_rows + [focus_row]
+    head_rows = sorted(head_rows, key=lambda x: (x["fund_company"] != focus_company, x["rank"]))
+
+    key_company_rows = []
+    for company in config.get("key_companies", []):
+        row = company_map.get(company)
+        if row is None:
+            row = {
+                "rank": len(company_rows) + 1,
+                "fund_company": company,
+                "product_count": 0,
+                "ordinary_count": 0,
+                "pension_count": 0,
+                "latest_scale_sum": 0.0,
+                "prev_scale_sum": 0.0,
+                "scale_change": 0.0,
+                "avg_latest_scale": None,
+                "max_product_scale": None,
+                "scale_share_pct": 0.0,
+                "repaired_scale_count": 0,
+                "is_focus_company": company == focus_company,
+                "is_key_company": True,
+                "top_products": [],
+            }
+        key_company_rows.append(row)
+
+    ordered_products = df.sort_values(["latest_scale", "fund_company", "fund_name"], ascending=[False, True, True]).copy()
+    repaired_rows = df[df["is_repaired_scale"].fillna(False)].copy().sort_values(["latest_scale", "fund_company", "fund_name"], ascending=[False, True, True])
+    top_products = ordered_products.head(12)
+
+    type_rows = []
+    for fof_type in ["普通FOF", "养老FOF"]:
+        sub = df[df["fof_type"] == fof_type].copy()
+        latest_scale_sum = float(sub["latest_scale"].fillna(0).sum())
+        prev_scale_sum = float(sub["prev_scale"].fillna(0).sum())
+        type_rows.append({
+            "fof_type": fof_type,
+            "product_count": int(len(sub)),
+            "latest_scale_sum": round(latest_scale_sum, 2),
+            "prev_scale_sum": round(prev_scale_sum, 2),
+            "scale_change": round(latest_scale_sum - prev_scale_sum, 2),
+            "repaired_scale_count": int(sub["is_repaired_scale"].fillna(False).sum()),
+        })
+
+    return {
+        "source_file": source_file,
+        "source_sheet": meta.get("sheet_name"),
+        "scale_as_of_date": meta.get("scale_as_of_date"),
+        "prev_scale_as_of_date": meta.get("prev_scale_as_of_date"),
+        "focus_company": focus_company,
+        "product_count": int(len(df)),
+        "company_count": int(df["fund_company"].nunique()),
+        "repaired_scale_count": int(df["is_repaired_scale"].fillna(False).sum()),
+        "total_latest_scale": round(total_latest_scale, 2),
+        "total_prev_scale": round(total_prev_scale, 2),
+        "total_scale_change": round(total_scale_change, 2),
+        "type_breakdown": type_rows,
+        "focus_company_rank": int(focus_row["rank"]),
+        "focus_company_snapshot": focus_row,
+        "top_companies": target_rows,
+        "head_companies": head_rows,
+        "target": {
+            "cutoff_rank": int(min(top_n, len(company_rows))) if company_rows else int(top_n),
+            "cutoff_company": threshold_row.get("fund_company"),
+            "cutoff_scale_sum": round(float(threshold_row.get("latest_scale_sum", 0.0)), 2),
+            "scale_gap_vs_focus": max(0.0, round(float(threshold_row.get("latest_scale_sum", 0.0)) - float(focus_row.get("latest_scale_sum", 0.0)), 2)),
+            "product_gap_vs_focus": max(0, int(threshold_row.get("product_count", 0)) - int(focus_row.get("product_count", 0))),
+        },
+        "company_rankings": company_rows,
+        "key_company_rankings": key_company_rows,
+        "products": [serialize_profile_record(r) for _, r in ordered_products.iterrows()],
+        "top_products": [serialize_profile_record(r) for _, r in top_products.iterrows()],
+        "repaired_scale_products": [serialize_profile_record(r) for _, r in repaired_rows.head(20).iterrows()],
+        "notes": [
+            "存量规模口径来自基金画像工作表，仅纳入研发类型为 FOF / FOF-养老 的产品。",
+            "latest_scale 为基金规模合计口径，和跟踪主表中的 raise_scale（募集规模）不是同一指标。",
+            "is_repaired_scale = true 表示该基金曾被标记为最新规模缺失，但当前主表中已经补齐到可用规模值。",
+        ],
+    }
+
+
+def load_fof_scale_profile_snapshot(args, config):
+    profile_path = resolve_business_file(args.profile_file, "profile")
+    if not profile_path.exists():
+        print("未识别到规模画像表：%s" % profile_path.name)
+        return None
+
+    print("识别到规模画像表：%s" % profile_path.name)
+    try:
+        profile_df, meta = load_fund_profile_data(profile_path)
+        snapshot = build_fof_scale_profile(profile_df, config, meta, profile_path.name)
+        print(
+            "规模画像读取完成：存量 FOF %s 只，基金公司 %s 家，最新规模口径日期 %s"
+            % (snapshot["product_count"], snapshot["company_count"], snapshot["scale_as_of_date"])
+        )
+        return snapshot
+    except Exception as exc:
+        print("规模画像表读取失败，跳过存量规模画像。原因：%s" % exc)
+        return None
+
+
+def build_snapshot(products, config, as_of_date, fof_scale_profile=None):
     week_start = as_of_date - timedelta(days=6)
     ytd_start = pd.Timestamp(year=as_of_date.year, month=1, day=1)
 
@@ -1062,6 +1355,7 @@ def build_snapshot(products, config, as_of_date):
                 "ytd": build_key_company_progress(products, config.get("key_companies", []), ytd_start, as_of_date),
                 "week": build_key_company_progress(products, config.get("key_companies", []), week_start, as_of_date),
             },
+            "fof_scale_profile": fof_scale_profile,
             "huaxia_chase": build_huaxia_chase_dashboard(products, as_of_date),
             "key_company_cards": build_key_company_cards(products, config.get("key_companies", []), week_start, as_of_date, ytd_start),
             "key_company_updates": [serialize_record(r) for _, r in products[products["is_key_company"]].sort_values(["latest_event_date", "raise_scale"], ascending=[False, False]).head(8).iterrows()],
@@ -1148,6 +1442,7 @@ def main():
     products, as_of_date, auto_as_of_date, as_of_source, selected_files = load_products_from_real_excels(config, args)
     if products is None:
         products, as_of_date, auto_as_of_date, as_of_source, selected_files = load_products_from_template(config, args)
+    fof_scale_profile = load_fof_scale_profile_snapshot(args, config)
 
     print("自动识别截止日：%s" % format_date(auto_as_of_date))
     if as_of_source == "manual":
@@ -1155,7 +1450,7 @@ def main():
     else:
         print("实际采用截止日：%s（自动识别）" % format_date(as_of_date))
 
-    snapshot = build_snapshot(products, config, as_of_date)
+    snapshot = build_snapshot(products, config, as_of_date, fof_scale_profile=fof_scale_profile)
 
     output_json = Path(args.output_json)
     output_js = Path(args.output_js)

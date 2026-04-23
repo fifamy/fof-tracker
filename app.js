@@ -29,6 +29,7 @@ const RAIL_NAV_ITEMS = [
   { tab: "tracker", label: "流程跟踪", note: "全量检索" },
   { tab: "companies", label: "公司竞争格局", note: "同业动作" },
   { tab: "key", label: "重点公司对比", note: "重点名单" },
+  { tab: "stock", label: "存量FOF规模", note: "最新规模" },
   { tab: "chase", label: "华夏追赶测算", note: "差距测算" },
   { tab: "detail", label: "产品详情", note: "单品诊断" },
 ];
@@ -49,6 +50,28 @@ function fmtNum(value, digits = 1) {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+}
+
+function fmtSignedNum(value, digits = 1) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  const num = Number(value);
+  return `${num > 0 ? "+" : ""}${fmtNum(num, digits)}`;
+}
+
+function getStockScaleProfile() {
+  return state.data?.summary?.fof_scale_profile || null;
+}
+
+function getStockCompanyStats(company) {
+  const profile = getStockScaleProfile();
+  if (!profile || !company) return null;
+  return (profile.company_rankings || []).find((item) => item.fund_company === company) || null;
+}
+
+function getStockMatrixProducts(extraFilter) {
+  const profile = getStockScaleProfile();
+  const rows = profile?.products || [];
+  return extraFilter ? rows.filter(extraFilter) : rows.slice();
 }
 
 function escapeHtml(value) {
@@ -542,6 +565,8 @@ function renderHero() {
   const prefix = state.topPeriod === "week" ? "近一周" : "今年以来";
   const topSignals = ((summary.stage_sections[state.topPeriod] || {}).declare || []).length;
   const huaxiaPipeline = state.data.products.filter((item) => item.fund_company === "华夏" && isInReviewProduct(item)).length;
+  const stockProfile = getStockScaleProfile();
+  const huaxiaStock = getStockCompanyStats("华夏");
   document.getElementById("hero-subtitle").textContent =
     `当前展示 ${prefix} FOF 竞品情报，统计区间为 ${range.start} 至 ${range.end}，重点盯紧新申报与华夏对标差距。`;
   document.getElementById("hero-pills").innerHTML = [
@@ -549,7 +574,11 @@ function renderHero() {
     `跟踪产品 ${state.data.products.length} 只`,
     `${prefix}新申报 ${topSignals} 只`,
     `华夏在途 ${huaxiaPipeline} 只`,
+    stockProfile ? `存量FOF ${stockProfile.product_count} 只` : null,
+    stockProfile ? `存量规模 ${fmtNum(stockProfile.total_latest_scale)} 亿元` : null,
+    huaxiaStock ? `华夏存量 #${huaxiaStock.rank} · ${fmtNum(huaxiaStock.latest_scale_sum)} 亿元` : null,
   ]
+    .filter(Boolean)
     .map((text) => `<span>${escapeHtml(text)}</span>`)
     .join("");
 }
@@ -848,17 +877,23 @@ function renderLaunchBattlefield() {
 
 function renderMatrixBattlefield() {
   const buckets = getMatrixBuckets();
-  const huaxiaRows = state.data.products.filter((item) => item.fund_company === "华夏");
+  const huaxiaStockRows = getStockMatrixProducts((item) => item.fund_company === "华夏");
+  const peerStockRows = getStockMatrixProducts((item) => item.fund_company !== "华夏");
   const declareRows = ((state.data.summary.stage_sections[state.topPeriod] || {}).declare || []).filter((item) => item.fund_company !== "华夏");
   const establishRows = ((state.data.summary.stage_sections[state.topPeriod] || {}).establish || []).filter((item) => item.fund_company !== "华夏");
-  const huaxiaMap = groupByMatrix(huaxiaRows);
+  const huaxiaMap = groupByMatrix(huaxiaStockRows);
+  const peerStockMap = groupByMatrix(peerStockRows);
   const declareMap = groupByMatrix(declareRows);
   const establishMap = groupByMatrix(establishRows);
+  const totalStockCount = huaxiaStockRows.length + peerStockRows.length;
+  const profileDate = getStockScaleProfile()?.scale_as_of_date;
 
   return `
     <div class="battlefield-summary">
       <div class="battlefield-headline"><strong>产品矩阵雷达</strong> 把“持有期 × 风险收益特征”压成一张空白网格，直接看竞品卡位和华夏缺口。</div>
-      <div class="battlefield-caption">红色闪点代表 ${state.topPeriod === "week" ? "近一周" : "今年以来"}新申报，蓝色代表新成立，米色代表华夏现有储备。</div>
+      <div class="battlefield-caption">底图纳入 ${fmtDate(profileDate)} 存量 FOF ${escapeHtml(totalStockCount)} 只；米色代表华夏存量，灰绿色代表同业存量，红色代表${
+        state.topPeriod === "week" ? "近一周" : "今年以来"
+      }新申报，蓝色代表新成立。</div>
     </div>
     <div class="matrix-grid">
       <div class="matrix-corner">风险 / 持有期</div>
@@ -871,31 +906,38 @@ function renderMatrixBattlefield() {
               .map((holding) => {
                 const key = `${risk}|${holding}`;
                 const huaxiaCount = (huaxiaMap[key] || []).length;
+                const peerStockCount = (peerStockMap[key] || []).length;
                 const declareCount = (declareMap[key] || []).length;
                 const establishCount = (establishMap[key] || []).length;
                 const hotCompanies = (declareMap[key] || []).slice(0, 2).map((item) => item.fund_company).join("、");
+                const stockCompanies = [...new Set((peerStockMap[key] || []).slice(0, 3).map((item) => item.fund_company).filter(Boolean))].join("、");
                 const classes = [
                   "matrix-cell",
-                  huaxiaCount === 0 && declareCount > 0 ? "is-gap" : "",
-                  declareCount > 0 ? "is-hot" : "",
+                  huaxiaCount === 0 && (peerStockCount > 0 || declareCount > 0 || establishCount > 0) ? "is-gap" : "",
+                  peerStockCount > 0 || declareCount > 0 || establishCount > 0 ? "is-hot" : "",
                 ]
                   .filter(Boolean)
                   .join(" ");
                 return `
                   <div class="${classes}">
                     <div class="matrix-badges">
-                      <span class="matrix-dot huaxia">华夏 ${huaxiaCount}</span>
+                      <span class="matrix-dot huaxia">华夏存量 ${huaxiaCount}</span>
+                      <span class="matrix-dot stock">同业存量 ${peerStockCount}</span>
                       <span class="matrix-dot declare">新申报 ${declareCount}</span>
                       <span class="matrix-dot establish">新成立 ${establishCount}</span>
                     </div>
                     <div class="matrix-note">${
-                      huaxiaCount === 0 && declareCount > 0
-                        ? `华夏缺位，${escapeHtml(hotCompanies || "竞品")}正在补空白`
-                        : declareCount > 0
-                          ? `竞品继续加密 ${escapeHtml(hotCompanies || "该格子")}`
-                          : huaxiaCount > 0
-                            ? "华夏已有储备"
-                            : "当前较安静"
+                      huaxiaCount === 0 && (peerStockCount > 0 || declareCount > 0 || establishCount > 0)
+                        ? `华夏缺位，${escapeHtml(stockCompanies || hotCompanies || "同业")}已在该格子形成存量或新增布局`
+                        : huaxiaCount > 0 && (declareCount > 0 || establishCount > 0)
+                          ? `华夏已有 ${escapeHtml(huaxiaCount)} 只存量，同业近期仍在继续加密 ${escapeHtml(hotCompanies || "该格子")}`
+                          : huaxiaCount > 0 && peerStockCount > 0
+                            ? `华夏已有存量布局，同业也已有 ${escapeHtml(peerStockCount)} 只存量产品卡位`
+                            : peerStockCount > 0
+                              ? `该格子以存量竞争为主，${escapeHtml(stockCompanies || "同业")}已有布局`
+                              : declareCount > 0 || establishCount > 0
+                                ? `近期新增动作集中在 ${escapeHtml(hotCompanies || "该格子")}`
+                                : "当前较安静"
                     }</div>
                   </div>
                 `;
@@ -1290,7 +1332,10 @@ function renderTrackerTable() {
 }
 
 function renderCompanyTable() {
-  const rows = state.data.summary.company_rankings[state.companyScope][state.companyPeriod] || [];
+  const rows = (state.data.summary.company_rankings[state.companyScope][state.companyPeriod] || []).map((row) => ({
+    ...row,
+    stockProfile: getStockCompanyStats(row.fund_company),
+  }));
   const container = document.getElementById("company-table");
   if (!rows.length) {
     container.innerHTML = `<div class="empty-box">当前口径下暂无公司数据。</div>`;
@@ -1306,6 +1351,9 @@ function renderCompanyTable() {
       { label: "发行数", key: "issue_count" },
       { label: "成立数", key: "establish_count" },
       { label: "募集规模(亿元)", render: (row) => fmtNum(row.raise_scale_sum) },
+      { label: "存量FOF数", render: (row) => escapeHtml(row.stockProfile?.product_count ?? "—") },
+      { label: "存量最新规模(亿元)", render: (row) => fmtNum(row.stockProfile?.latest_scale_sum) },
+      { label: "存量排名", render: (row) => (row.stockProfile?.rank != null ? `#${escapeHtml(row.stockProfile.rank)}` : "—") },
       { label: "平均募集规模(亿元)", render: (row) => fmtNum(row.avg_raise_scale) },
       { label: "最快成立天数", render: (row) => escapeHtml(row.fastest_establish_days ?? "—") },
       { label: "最新动作日期", render: (row) => fmtDate(row.latest_event_date) },
@@ -1336,7 +1384,7 @@ function renderKeyCompanyProgress() {
   container.innerHTML = `
     <div class="progress-panel-head">
       <div class="progress-panel-kicker">YTD Dashboard</div>
-      <div class="progress-panel-note">右侧为已成立产品募集规模合计，单位：亿元</div>
+      <div class="progress-panel-note">右侧为已成立产品募集规模；公司名下补充显示存量 FOF 最新规模与排名</div>
     </div>
     <div class="progress-compare">
       <div class="progress-head">
@@ -1349,6 +1397,7 @@ function renderKeyCompanyProgress() {
       </div>
       ${rows
         .map((row) => {
+          const stockProfile = getStockCompanyStats(row.fund_company);
           const declareWidth = Math.max(8, (100 * (row.declare_count || 0)) / maxDeclare);
           const acceptWidth = Math.max(8, (100 * (row.accept_count || 0)) / maxAccept);
           const approvalWidth = Math.max(8, (100 * (row.approval_count || 0)) / maxApproval);
@@ -1359,6 +1408,11 @@ function renderKeyCompanyProgress() {
             <div class="progress-row ${row.is_huaxia ? "is-huaxia" : ""}">
               <div class="progress-company-wrap">
                 <div class="progress-company">${escapeHtml(row.fund_company)}</div>
+                <div class="progress-company-meta">${
+                  stockProfile
+                    ? `存量 #${escapeHtml(stockProfile.rank)} · ${fmtNum(stockProfile.latest_scale_sum)} 亿元 · ${escapeHtml(stockProfile.product_count)} 只`
+                    : "暂无存量规模画像"
+                }</div>
                 ${row.is_huaxia ? `<div class="progress-badge">重点观察</div>` : ``}
               </div>
               <div class="progress-cell">
@@ -1391,7 +1445,10 @@ function renderKeyCompanyProgress() {
 }
 
 function renderKeyCompanyCards() {
-  const rows = state.data.summary.key_company_cards || [];
+  const rows = (state.data.summary.key_company_cards || []).map((row) => ({
+    ...row,
+    stockProfile: getStockCompanyStats(row.fund_company),
+  }));
   const container = document.getElementById("key-company-cards");
   if (!rows.length) {
     container.innerHTML = `<div class="empty-box">暂无重点公司配置或数据。</div>`;
@@ -1410,6 +1467,15 @@ function renderKeyCompanyCards() {
           </div>
           <div class="metric-row">
             <div class="metric-pill"><div class="label">总募集规模</div><div class="value">${fmtNum(row.raise_scale_sum)}</div></div>
+            <div class="metric-pill"><div class="label">存量最新规模</div><div class="value">${fmtNum(row.stockProfile?.latest_scale_sum)}</div></div>
+            <div class="metric-pill"><div class="label">存量排名</div><div class="value">${
+              row.stockProfile?.rank != null ? `#${escapeHtml(row.stockProfile.rank)}` : "—"
+            }</div></div>
+          </div>
+          <div class="metric-row">
+            <div class="metric-pill"><div class="label">存量FOF数</div><div class="value">${escapeHtml(row.stockProfile?.product_count ?? "—")}</div></div>
+            <div class="metric-pill"><div class="label">养老FOF数</div><div class="value">${escapeHtml(row.stockProfile?.pension_count ?? "—")}</div></div>
+            <div class="metric-pill"><div class="label">较上期变化</div><div class="value">${fmtSignedNum(row.stockProfile?.scale_change)}</div></div>
           </div>
           <div class="section-head compact" style="margin-top: 16px;">
             <div><h2 style="font-size:16px;">最新产品清单</h2></div>
@@ -1434,6 +1500,266 @@ function renderKeyCompanyCards() {
     )
     .join("");
   bindClickableRows(container);
+}
+
+function renderStockScaleProfile() {
+  const profile = state.data.summary.fof_scale_profile;
+  const kpiContainer = document.getElementById("stock-kpi-grid");
+  const briefContainer = document.getElementById("stock-brief");
+  const raceContainer = document.getElementById("stock-raceboard");
+  const keyCardContainer = document.getElementById("stock-key-company-cards");
+  const companyTableContainer = document.getElementById("stock-company-table");
+  const topProductContainer = document.getElementById("stock-top-product-table");
+  const repairedTableContainer = document.getElementById("stock-repaired-table");
+
+  if (!profile) {
+    const empty = `<div class="empty-box">当前没有可用的存量 FOF 最新规模数据。</div>`;
+    kpiContainer.innerHTML = empty;
+    briefContainer.innerHTML = empty;
+    raceContainer.innerHTML = empty;
+    keyCardContainer.innerHTML = empty;
+    companyTableContainer.innerHTML = empty;
+    topProductContainer.innerHTML = empty;
+    repairedTableContainer.innerHTML = empty;
+    return;
+  }
+
+  const focus = profile.focus_company_snapshot || {};
+  const target = profile.target || {};
+  const ordinary = (profile.type_breakdown || []).find((item) => item.fof_type === "普通FOF") || {};
+  const pension = (profile.type_breakdown || []).find((item) => item.fof_type === "养老FOF") || {};
+  const scaleGap = Number(target.scale_gap_vs_focus) || 0;
+  const topCompanyNames = (profile.top_companies || []).map((item) => item.fund_company).join("、");
+
+  const kpis = [
+    {
+      label: "存量FOF产品数",
+      value: profile.product_count ?? 0,
+      note: `覆盖 ${profile.company_count ?? 0} 家基金公司`,
+    },
+    {
+      label: "最新FOF总规模",
+      value: `${fmtNum(profile.total_latest_scale)} 亿元`,
+      note: `口径日期 ${fmtDate(profile.scale_as_of_date)}`,
+    },
+    {
+      label: "普通 / 养老FOF",
+      value: `${ordinary.product_count ?? 0} / ${pension.product_count ?? 0}`,
+      note: `规模 ${fmtNum(ordinary.latest_scale_sum)} / ${fmtNum(pension.latest_scale_sum)} 亿元`,
+    },
+    {
+      label: "华夏当前排名",
+      value: focus.rank != null ? `#${focus.rank}` : "—",
+      note: `最新规模 ${fmtNum(focus.latest_scale_sum)} 亿元`,
+    },
+    {
+      label: "较上期规模变化",
+      value: `${fmtSignedNum(profile.total_scale_change)} 亿元`,
+      note: `对比 ${fmtDate(profile.prev_scale_as_of_date)}`,
+    },
+    {
+      label: "补齐规模样本",
+      value: profile.repaired_scale_count ?? 0,
+      note: "曾标记缺失，但当前主表已补齐规模值",
+    },
+  ];
+  kpiContainer.innerHTML = kpis
+    .map(
+      (item) => `
+        <article class="kpi-card chase-kpi-card">
+          <div class="kpi-label">${escapeHtml(item.label)}</div>
+          <div class="kpi-value">${escapeHtml(item.value)}</div>
+          <div class="kpi-note">${escapeHtml(item.note)}</div>
+        </article>
+      `
+    )
+    .join("");
+
+  const latestScaleSentence =
+    scaleGap > 0
+      ? `若按当前最新规模排名，华夏距离前 ${target.cutoff_rank || 3} 门槛 ${escapeHtml(target.cutoff_company || "头部公司")} 还差 <strong>${fmtNum(
+          scaleGap
+        )} 亿元</strong>。`
+      : "按当前最新规模口径，华夏已经站在头部门槛之内。";
+  briefContainer.innerHTML = `
+    <div class="chase-brief-grid">
+      <div class="chase-brief-main">
+        <div class="progress-panel-kicker">Stock FOF Scale</div>
+        <h3>这块看的是存量 FOF 最新规模，不是今年新成立产品的募集规模。</h3>
+        <p>
+          当前口径来自 <strong>${escapeHtml(profile.source_file || "基金画像表")}</strong> 的
+          <strong>${escapeHtml(profile.source_sheet || "基金画像")}</strong> 工作表，统计日期为
+          <strong>${fmtDate(profile.scale_as_of_date)}</strong>。
+          全市场存量 FOF 共 <strong>${escapeHtml(profile.product_count ?? 0)} 只</strong>，
+          合计最新规模 <strong>${fmtNum(profile.total_latest_scale)} 亿元</strong>，
+          头部公司主要是 ${escapeHtml(topCompanyNames || "—")}。
+        </p>
+        <p>
+          华夏当前最新规模为 <strong>${fmtNum(focus.latest_scale_sum)} 亿元</strong>，排名
+          <strong>#${escapeHtml(focus.rank ?? profile.focus_company_rank ?? "—")}</strong>，${latestScaleSentence}
+        </p>
+      </div>
+      <div class="chase-brief-side">
+        <div class="chase-stat-card">
+          <span>华夏产品数</span>
+          <strong>${escapeHtml(focus.product_count ?? 0)} 只</strong>
+        </div>
+        <div class="chase-stat-card">
+          <span>华夏市占率</span>
+          <strong>${focus.scale_share_pct != null ? `${fmtNum(focus.scale_share_pct, 2)}%` : "—"}</strong>
+        </div>
+        <div class="chase-stat-card">
+          <span>前三门槛</span>
+          <strong>${fmtNum(target.cutoff_scale_sum)} 亿元</strong>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const raceRows = profile.head_companies || [];
+  if (!raceRows.length) {
+    raceContainer.innerHTML = `<div class="empty-box">暂无头部公司最新规模数据。</div>`;
+  } else {
+    const maxScale = Math.max(...raceRows.map((row) => Number(row.latest_scale_sum) || 0), 1);
+    raceContainer.innerHTML = `<div class="chase-raceboard">${raceRows
+      .map((row) => {
+        const width = Math.max(10, (100 * (Number(row.latest_scale_sum) || 0)) / maxScale);
+        const isCutoff = (row.rank || 999) <= (target.cutoff_rank || 3);
+        const gapText = row.is_focus_company
+          ? "华夏基线"
+          : `领先华夏 ${Math.max((Number(row.latest_scale_sum) || 0) - (Number(focus.latest_scale_sum) || 0), 0).toFixed(1)} 亿元`;
+        return `
+          <article class="chase-race-row ${row.is_focus_company ? "is-focus" : ""} ${isCutoff ? "is-cutoff" : ""}">
+            <div class="chase-race-top">
+              <div>
+                <div class="chase-race-company">#${escapeHtml(row.rank)} ${escapeHtml(row.fund_company)}</div>
+                <div class="chase-race-sub">
+                  产品 ${escapeHtml(row.product_count)} 只 · 普通 ${escapeHtml(row.ordinary_count)} · 养老 ${escapeHtml(row.pension_count)}
+                </div>
+              </div>
+              <div class="chase-race-badges">
+                ${row.is_focus_company ? `<span class="chase-pill focus">华夏</span>` : ""}
+                ${isCutoff ? `<span class="chase-pill cutoff">头部门槛</span>` : ""}
+                <span class="chase-gap">${escapeHtml(gapText)}</span>
+              </div>
+            </div>
+            <div class="chase-race-track">
+              <div class="chase-race-fill" style="width:${width}%"></div>
+            </div>
+            <div class="chase-race-bottom">
+              <div>最新规模 <strong>${fmtNum(row.latest_scale_sum)} 亿元</strong></div>
+              <div>市占率 <strong>${row.scale_share_pct != null ? `${fmtNum(row.scale_share_pct, 2)}%` : "—"}</strong></div>
+            </div>
+          </article>
+        `;
+      })
+      .join("")}</div>`;
+  }
+
+  const keyRows = profile.key_company_rankings || [];
+  keyCardContainer.innerHTML = keyRows.length
+    ? keyRows
+        .map(
+          (row) => `
+            <article class="company-mini-card">
+              <h3>${escapeHtml(row.fund_company)}</h3>
+              <div class="metric-row">
+                <div class="metric-pill"><div class="label">最新排名</div><div class="value">${row.rank != null ? `#${escapeHtml(row.rank)}` : "—"}</div></div>
+                <div class="metric-pill"><div class="label">产品数</div><div class="value">${escapeHtml(row.product_count ?? 0)}</div></div>
+                <div class="metric-pill"><div class="label">最新规模</div><div class="value">${fmtNum(row.latest_scale_sum)}</div></div>
+              </div>
+              <div class="metric-row">
+                <div class="metric-pill"><div class="label">普通FOF</div><div class="value">${escapeHtml(row.ordinary_count ?? 0)}</div></div>
+                <div class="metric-pill"><div class="label">养老FOF</div><div class="value">${escapeHtml(row.pension_count ?? 0)}</div></div>
+                <div class="metric-pill"><div class="label">补齐样本</div><div class="value">${escapeHtml(row.repaired_scale_count ?? 0)}</div></div>
+              </div>
+              <div class="metric-row">
+                <div class="metric-pill"><div class="label">市占率</div><div class="value">${
+                  row.scale_share_pct != null ? `${fmtNum(row.scale_share_pct, 2)}%` : "—"
+                }</div></div>
+                <div class="metric-pill"><div class="label">较上期变化</div><div class="value">${fmtSignedNum(row.scale_change)}</div></div>
+              </div>
+              <div class="section-head compact" style="margin-top: 16px;">
+                <div><h2 style="font-size:16px;">规模前三产品</h2></div>
+              </div>
+              <div class="mini-list">
+                ${(row.top_products || [])
+                  .map(
+                    (item) => `
+                      <div class="mini-item">
+                        <div class="mini-top">
+                          <div class="mini-name">${escapeHtml(item.fund_name)}</div>
+                          <span class="pill">${escapeHtml(item.fof_type)}</span>
+                        </div>
+                        <div class="mini-meta">最新规模 ${fmtNum(item.latest_scale)} 亿元${
+                          item.is_repaired_scale ? " · 已补齐规模" : ""
+                        }</div>
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </article>
+          `
+        )
+        .join("")
+    : `<div class="empty-box">暂无重点公司存量规模数据。</div>`;
+
+  const companyRows = (profile.company_rankings || []).slice(0, 30);
+  companyTableContainer.innerHTML = companyRows.length
+    ? tableMarkup(
+        [
+          { label: "排名", render: (row) => escapeHtml(`#${row.rank}`) },
+          {
+            label: "基金公司",
+            render: (row) =>
+              `${escapeHtml(row.fund_company)} ${
+                row.is_focus_company ? `<span class="table-tag focus">华夏</span>` : ""
+              } ${(row.rank || 999) <= (target.cutoff_rank || 3) ? `<span class="table-tag cutoff">头部</span>` : ""}`,
+          },
+          { label: "产品数", render: (row) => escapeHtml(row.product_count) },
+          { label: "普通FOF", render: (row) => escapeHtml(row.ordinary_count) },
+          { label: "养老FOF", render: (row) => escapeHtml(row.pension_count) },
+          { label: "最新规模(亿元)", render: (row) => fmtNum(row.latest_scale_sum) },
+          { label: "市占率", render: (row) => (row.scale_share_pct != null ? `${fmtNum(row.scale_share_pct, 2)}%` : "—") },
+          { label: "较上期变化(亿元)", render: (row) => fmtSignedNum(row.scale_change) },
+          { label: "平均单只规模(亿元)", render: (row) => fmtNum(row.avg_latest_scale) },
+          { label: "补齐样本", render: (row) => escapeHtml(row.repaired_scale_count ?? 0) },
+        ],
+        companyRows,
+        false
+      )
+    : `<div class="empty-box">暂无公司规模总表。</div>`;
+
+  const topProducts = profile.top_products || [];
+  topProductContainer.innerHTML = topProducts.length
+    ? tableMarkup(
+        [
+          { label: "基金名称", key: "fund_name" },
+          { label: "基金公司", key: "fund_company" },
+          { label: "FOF类型", key: "fof_type" },
+          { label: "最新规模(亿元)", render: (row) => fmtNum(row.latest_scale) },
+          { label: "较上期变化(亿元)", render: (row) => fmtSignedNum(row.scale_change) },
+        ],
+        topProducts,
+        false
+      )
+    : `<div class="empty-box">暂无头部产品规模数据。</div>`;
+
+  const repairedRows = profile.repaired_scale_products || [];
+  repairedTableContainer.innerHTML = repairedRows.length
+    ? tableMarkup(
+        [
+          { label: "基金名称", key: "fund_name" },
+          { label: "基金公司", key: "fund_company" },
+          { label: "FOF类型", key: "fof_type" },
+          { label: "最新规模(亿元)", render: (row) => fmtNum(row.latest_scale) },
+          { label: "补齐状态", render: () => "已补齐" },
+        ],
+        repairedRows,
+        false
+      )
+    : `<div class="empty-box">当前没有已补齐规模样本。</div>`;
 }
 
 function renderHuaxiaChase() {
@@ -1969,6 +2295,7 @@ function renderAll() {
   populateTrackerFilters();
   renderTrackerTable();
   renderCompanyTable();
+  renderStockScaleProfile();
   renderKeyCompanyProgress();
   renderKeyCompanyCards();
   renderHuaxiaChase();

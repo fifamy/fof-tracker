@@ -8,7 +8,7 @@
       name="description"
       content="跟踪全市场公募FOF的申报、受理、获批、发行、成立情况，并支持重点基金公司竞争格局观察。"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260422-intel1" />
+    <link rel="stylesheet" href="./styles.css?v=20260423-profile2" />
   </head>
   <body>
     <div class="shell">
@@ -43,6 +43,7 @@
               <button class="tab" data-tab="tracker">流程跟踪</button>
               <button class="tab" data-tab="companies">公司竞争格局</button>
               <button class="tab" data-tab="key">重点公司对比</button>
+              <button class="tab" data-tab="stock">存量FOF规模</button>
               <button class="tab" data-tab="chase">华夏追赶测算</button>
               <button class="tab" data-tab="detail">产品详情</button>
             </div>
@@ -224,6 +225,66 @@
             <div class="company-card-grid" id="key-company-cards"></div>
           </section>
 
+          <section class="panel" id="panel-stock">
+            <div class="section-head">
+              <div>
+                <h2>存量FOF最新规模画像</h2>
+                <p>基于基金画像表的最新规模口径，单独观察全市场存量 FOF / 养老 FOF 的家底、排名和华夏差距。</p>
+              </div>
+            </div>
+            <div class="kpi-grid chase-kpi-grid" id="stock-kpi-grid"></div>
+            <div class="card chase-brief" id="stock-brief"></div>
+            <div class="chase-layout">
+              <div class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>头部公司最新规模对比</h2>
+                    <p>按最新基金规模口径排序，直接看华夏与头部公司的存量规模差距。</p>
+                  </div>
+                </div>
+                <div id="stock-raceboard"></div>
+              </div>
+              <div class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>重点公司存量画像</h2>
+                    <p>同步看重点公司的产品数、类型结构、最新规模和已补齐样本。</p>
+                  </div>
+                </div>
+                <div class="company-card-grid" id="stock-key-company-cards"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="section-head">
+                <div>
+                  <h2>公司规模总表</h2>
+                  <p>查看基金公司在存量 FOF 口径下的产品数、结构、最新规模、市占率与规模变化。</p>
+                </div>
+              </div>
+              <div class="table-wrap" id="stock-company-table"></div>
+            </div>
+            <div class="chase-layout">
+              <div class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>规模TOP产品</h2>
+                    <p>全市场存量 FOF 中，当前最新规模靠前的产品清单。</p>
+                  </div>
+                </div>
+                <div class="table-wrap" id="stock-top-product-table"></div>
+              </div>
+              <div class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>已补齐规模样本</h2>
+                    <p>曾被标记为最新规模缺失，但当前主表口径已补齐的样本。</p>
+                  </div>
+                </div>
+                <div class="table-wrap" id="stock-repaired-table"></div>
+              </div>
+            </div>
+          </section>
+
           <section class="panel" id="panel-chase">
             <div class="section-head">
               <div>
@@ -293,7 +354,7 @@
       <div class="drawer-body" id="drawer-content"></div>
     </aside>
 
-    <script src="./data/fof_tracker_snapshot.js?v=20260417-chase1"></script>
-    <script src="./app.js?v=20260422-intel1"></script>
+    <script src="./data/fof_tracker_snapshot.js?v=20260423-profile2"></script>
+    <script src="./app.js?v=20260423-profile2"></script>
   </body>
 </html>
