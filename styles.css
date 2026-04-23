@@ -140,6 +140,87 @@ body {
   margin-bottom: 12px;
 }
 
+#watch-company-list {
+  display: grid;
+  gap: 12px;
+}
+
+.watch-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.watch-chip {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(24, 33, 47, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--muted);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.watch-chip:hover {
+  transform: translateY(-1px);
+}
+
+.watch-chip.is-active {
+  background: var(--blue);
+  border-color: rgba(34, 72, 112, 0.22);
+  color: #fff;
+}
+
+.watch-summary {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid rgba(24, 33, 47, 0.06);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+#watch-feed {
+  margin-top: 14px;
+}
+
+.watch-feed-list {
+  display: grid;
+  gap: 10px;
+}
+
+.watch-feed-item {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(24, 33, 47, 0.07);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.watch-feed-item.is-critical {
+  background: linear-gradient(135deg, rgba(193, 18, 31, 0.08), rgba(255, 255, 255, 0.96));
+  border-color: rgba(193, 18, 31, 0.16);
+}
+
+.watch-feed-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.watch-feed-name {
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.watch-feed-meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
 .toolbar {
   border-radius: var(--radius-xl);
   padding: 16px;
@@ -265,6 +346,17 @@ input {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 14px;
+}
+
+.intelligence-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.intelligence-grid > .card {
+  margin-top: 0;
 }
 
 .kpi-card {
@@ -468,6 +560,152 @@ tbody tr:hover {
   color: var(--muted);
   border: 1px dashed rgba(24, 33, 47, 0.12);
   font-size: 13px;
+}
+
+.forecast-list,
+.density-list,
+.macro-stack,
+.diagnosis-stage-grid,
+.diagnosis-product-list {
+  display: grid;
+  gap: 12px;
+}
+
+.forecast-item,
+.density-item,
+.macro-card,
+.diagnosis-stage-card,
+.diagnosis-product-item {
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(24, 33, 47, 0.07);
+}
+
+.forecast-item {
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.forecast-date {
+  padding: 12px 10px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.95);
+  border: 1px solid rgba(24, 33, 47, 0.06);
+  text-align: center;
+}
+
+.forecast-date strong {
+  display: block;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.forecast-date span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.forecast-copy strong,
+.density-copy strong,
+.macro-regime strong,
+.diagnosis-stage-card strong {
+  display: block;
+  line-height: 1.6;
+}
+
+.forecast-meta,
+.density-meta,
+.macro-card p,
+.diagnosis-stage-card p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.forecast-badges,
+.density-badges,
+.macro-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.severity-chip,
+.info-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.severity-chip.critical {
+  background: rgba(193, 18, 31, 0.12);
+  color: var(--red);
+}
+
+.severity-chip.warning {
+  background: rgba(217, 119, 6, 0.14);
+  color: #a16207;
+}
+
+.severity-chip.watch {
+  background: rgba(34, 72, 112, 0.12);
+  color: var(--blue);
+}
+
+.info-chip {
+  background: rgba(24, 33, 47, 0.06);
+  color: var(--text);
+}
+
+.macro-card.is-warm {
+  background: linear-gradient(135deg, rgba(255, 244, 229, 0.96), rgba(255, 255, 255, 0.94));
+}
+
+.macro-card.is-hot {
+  background: linear-gradient(135deg, rgba(252, 232, 234, 0.92), rgba(255, 255, 255, 0.94));
+}
+
+.macro-card.is-cool {
+  background: linear-gradient(135deg, rgba(232, 240, 248, 0.92), rgba(255, 255, 255, 0.94));
+}
+
+.macro-card.is-defensive {
+  background: linear-gradient(135deg, rgba(230, 247, 240, 0.92), rgba(255, 255, 255, 0.94));
+}
+
+.macro-regime {
+  display: grid;
+  gap: 6px;
+}
+
+.macro-regime span,
+.diagnosis-stage-card span,
+.diagnosis-product-item span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diagnosis-product-item strong {
+  display: block;
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.diagnosis-product-item p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
 }
 
 .mini-list,
@@ -969,6 +1207,11 @@ input[type="text"] {
 .table-tag.cutoff {
   background: rgba(34, 72, 112, 0.12);
   color: var(--blue);
+}
+
+.table-tag.watch {
+  background: rgba(19, 121, 91, 0.12);
+  color: var(--green);
 }
 
 .chase-gap {
@@ -1827,6 +2070,7 @@ body.drawer-open {
   .company-card-grid,
   .detail-hero,
   .detail-split,
+  .intelligence-grid,
   .strategy-layout,
   .overview-layout,
   .filters-grid,
@@ -1862,6 +2106,10 @@ body.drawer-open {
   .chase-race-top,
   .chase-race-bottom {
     flex-direction: column;
+  }
+
+  .forecast-item {
+    grid-template-columns: 1fr;
   }
 
   .chase-race-badges {

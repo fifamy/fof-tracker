@@ -10,6 +10,11 @@
     "汇添富",
     "博时"
   ],
+  "strategy_density_threshold_companies": 3,
+  "macro_clock": {
+    "current_regime": "复苏期",
+    "note": "当前先按复苏期做宏观联动高亮；后续可按月度宏观判断切换为过热期/滞胀期/衰退期。"
+  },
   "stage_order": [
     "新申报",
     "新受理",

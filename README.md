@@ -14,6 +14,7 @@
 - `app.js`
 - `config/fof_tracker_config.json`
 - `data/fof_stage_source_template.csv`
+- `data/fof_soft_signal_template.csv`
 - `data/fof_tracker_snapshot.json`
 - `data/fof_tracker_snapshot.js`
 - `data/fof_tracker_detail.csv`
@@ -47,6 +48,15 @@
 - 重点公司对比
 - 华夏追赶测算
 - 产品详情
+
+本轮新增的情报增强包括：
+
+- 策略密集布局提醒：按“FOF类型 × 风险收益特征 × 持有期”做策略对标，不再只按产品名称比对
+- 未来30天节点预测：基于历史平均耗时，估算未来一个月可能发生的受理、获批、发行、成立节点
+- 审批效能堵点诊断：横向对比华夏与重点同业在各阶段的平均耗时，识别流程慢点
+- 发行软信息模板：支持把拟发渠道、持有人结构、底层选基偏好和底层池准备建议纳入 snapshot
+- 本地订阅公司：可在浏览器本地订阅重点公司，把对应异动优先抬到侧栏
+- 投资时钟联动：支持在 `config/fof_tracker_config.json` 中填写 `macro_clock.current_regime`，按宏观阶段高亮对应赛道
 
 其中“华夏追赶测算”模块用于回答：
 
@@ -98,10 +108,35 @@
 - 托管人
 - 备注
 
-3. 生成前端 snapshot：
+3. 如需维护发行软信息，可填写：
+
+- `data/fof_soft_signal_template.csv`
+
+字段包括：
+
+- 产品ID
+- 基金名称
+- 基金公司
+- 拟发渠道
+- 渠道状态
+- 持有人结构预判
+- 底层选基偏好
+- 底层池准备建议
+- 情报等级
+- 最近更新日
+- 备注
+
+匹配规则说明：
+
+- 优先按 `产品ID` 匹配
+- 若未填 `产品ID`，则退回按 `基金名称` 归一化匹配
+- 模板可只填部分字段；未填项前端会继续显示规则预判或“待补充”
+
+4. 生成前端 snapshot：
 
 ```bash
 cd /Users/menyao/Documents/trae_projects/fof-tracker
+python3 -m pip install pandas openpyxl
 python3 scripts/build_fof_tracker_snapshot.py
 ```
 
@@ -112,7 +147,7 @@ cd /Users/menyao/Documents/trae_projects/fof-tracker
 python3 scripts/build_fof_tracker_snapshot.py --as-of-date 2026-04-18
 ```
 
-4. 启动本地静态服务：
+5. 启动本地静态服务：
 
 ```bash
 cd /Users/menyao/Documents/trae_projects/fof-tracker
@@ -128,8 +163,12 @@ http://127.0.0.1:8080/
 ## 重点说明
 
 - 重点公司名单在 `config/fof_tracker_config.json` 中维护
+- 投资时钟阶段可在 `config/fof_tracker_config.json -> macro_clock.current_regime` 中维护；当前默认值已设为 `复苏期`
 - 前端默认优先读取 `data/fof_tracker_snapshot.js`
 - 默认优先读取 4 个业务 Excel；只有 Excel 不存在时，才退回 `data/fof_stage_source_template.csv`
+- `data/fof_soft_signal_template.csv` 为可选补充模板，不影响主流程生成
+- `data/fof_soft_signal_template.csv` 当前已预填 6 只重点在途产品的 `产品ID / 基金名称 / 基金公司`，便于直接补渠道与持有人结构
+- 证监会网页补充数据在脚本中仍会优先尝试；若运行环境与 `neris.csrc.gov.cn` 的 TLS 握手不兼容，脚本会自动回退到本地 Excel 主链路继续生成
 - 当前页面重点展示“近一周”和“今年以来”
 - 若你后续部署到 GitHub Pages，也可以继续保留这套静态结构
 
@@ -146,6 +185,15 @@ http://127.0.0.1:8080/
 
 ### 2026-04-23
 
+- 首页新增“未来30天预测轴”“密集布局建议简报”“投资时钟联动”三块情报区
+- snapshot 新增 `summary.strategy_density`、`summary.future_timeline`、`summary.efficiency_diagnosis`、`summary.macro_clock`
+- 新增 `data/fof_soft_signal_template.csv`，snapshot 补充 `summary.soft_intel_dashboard`，用于承载渠道排期、持有人结构和底层偏好等软信息
+- `data/fof_soft_signal_template.csv` 预填当前最值得优先维护的 6 只在途产品，方便业务直接补录渠道排期与持有人结构
+- `config/fof_tracker_config.json` 当前默认把 `macro_clock.current_regime` 设为 `复苏期`，首页会按复苏期逻辑高亮积极型 / 多资产赛道
+- 构建脚本补充 `pandas` 缺失时的明确报错提示；若证监会网页补充接口 TLS 握手失败，会自动回退到本地 Excel 生成
+- 单品诊断补充赛道密度、华夏覆盖、持有人结构预判和下一节点预测；“同类历史情景测算”补充规则胜率
+- 侧栏新增“订阅异动”，可本地订阅重点公司并优先查看其最新动作
+- `config/fof_tracker_config.json` 新增 `strategy_density_threshold_companies` 和 `macro_clock` 配置入口
 - snapshot 新增 `summary.fof_scale_profile` 数据结构，用于承载存量 FOF 最新规模画像
 - 新增“存量FOF规模”页签，并把首页摘要、公司竞争格局、重点公司卡片同步补上存量 FOF 最新规模口径
 - “产品矩阵雷达”改为用存量 FOF 做底图，再叠加近一周 / 今年以来的新申报、新成立信号，不再只看新发产品

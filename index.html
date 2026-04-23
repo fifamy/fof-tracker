@@ -8,7 +8,7 @@
       name="description"
       content="跟踪全市场公募FOF的申报、受理、获批、发行、成立情况，并支持重点基金公司竞争格局观察。"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260423-profile2" />
+    <link rel="stylesheet" href="./styles.css?v=20260423-intel2" />
   </head>
   <body>
     <div class="shell">
@@ -29,6 +29,12 @@
           <div class="rail-card">
             <div class="rail-title">盯盘焦点</div>
             <div id="in-review-pool"></div>
+          </div>
+
+          <div class="rail-card">
+            <div class="rail-title">订阅异动</div>
+            <div id="watch-company-list"></div>
+            <div id="watch-feed"></div>
           </div>
         </aside>
 
@@ -51,6 +57,45 @@
 
           <section class="panel is-active" id="panel-overview">
             <div class="kpi-grid" id="kpi-grid"></div>
+
+            <div class="intelligence-grid">
+              <section class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>未来30天预测轴</h2>
+                    <p>按历史平均耗时估算未来一个月可能发生的受理、获批、发行与成立节点。</p>
+                  </div>
+                </div>
+                <div id="forecast-timeline"></div>
+              </section>
+              <section class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>密集布局建议简报</h2>
+                    <p>自动识别 3 家以上重点公司密集布子的赛道，并标出华夏当前缺口。</p>
+                  </div>
+                </div>
+                <div id="density-alerts"></div>
+              </section>
+              <section class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>投资时钟联动</h2>
+                    <p>把宏观阶段映射到需要优先高亮的 FOF 赛道；未配置时给出规则提示。</p>
+                  </div>
+                </div>
+                <div id="macro-clock"></div>
+              </section>
+              <section class="card">
+                <div class="section-head compact">
+                  <div>
+                    <h2>发行软信息看板</h2>
+                    <p>把拟发渠道、持有人结构和底层偏好纳入快照，支持后续人工持续维护。</p>
+                  </div>
+                </div>
+                <div id="soft-intel-board"></div>
+              </section>
+            </div>
 
             <div class="card">
               <div class="section-head">
@@ -294,6 +339,15 @@
             </div>
             <div class="kpi-grid chase-kpi-grid" id="chase-kpi-grid"></div>
             <div class="card chase-brief" id="chase-brief"></div>
+            <div class="card">
+              <div class="section-head">
+                <div>
+                  <h2>审批效能堵点诊断</h2>
+                  <p>横向对比华夏与重点同业的阶段耗时，定位申报、受理、获批、发行链条中的慢点。</p>
+                </div>
+              </div>
+              <div id="chase-efficiency-diagnosis"></div>
+            </div>
             <div class="chase-layout">
               <div class="card">
                 <div class="section-head compact">
@@ -354,7 +408,7 @@
       <div class="drawer-body" id="drawer-content"></div>
     </aside>
 
-    <script src="./data/fof_tracker_snapshot.js?v=20260423-profile2"></script>
-    <script src="./app.js?v=20260423-profile2"></script>
+    <script src="./data/fof_tracker_snapshot.js?v=20260423-intel2"></script>
+    <script src="./app.js?v=20260423-intel2"></script>
   </body>
 </html>

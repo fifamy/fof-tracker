@@ -7,6 +7,7 @@ const state = {
   battlefieldTab: "launch",
   selectedProductId: null,
   drawerOpen: false,
+  watchCompanies: [],
   monitorFilters: {
     company: "",
     stage: "新申报",
@@ -24,6 +25,7 @@ const state = {
 };
 
 const STAGE_FLOW = ["新申报", "新受理", "已获批", "发行中", "已成立"];
+const WATCH_STORAGE_KEY = "fof-tracker-watch-companies";
 const RAIL_NAV_ITEMS = [
   { tab: "overview", label: "首页总览", note: "情报主屏" },
   { tab: "tracker", label: "流程跟踪", note: "全量检索" },
@@ -72,6 +74,29 @@ function getStockMatrixProducts(extraFilter) {
   const profile = getStockScaleProfile();
   const rows = profile?.products || [];
   return extraFilter ? rows.filter(extraFilter) : rows.slice();
+}
+
+function loadWatchCompanies() {
+  try {
+    const stored = window.localStorage.getItem(WATCH_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function persistWatchCompanies() {
+  try {
+    window.localStorage.setItem(WATCH_STORAGE_KEY, JSON.stringify(state.watchCompanies));
+  } catch (error) {
+    // ignore localStorage failures
+  }
+}
+
+function isWatchedCompany(company) {
+  return state.watchCompanies.includes(company);
 }
 
 function escapeHtml(value) {
@@ -214,11 +239,102 @@ function deriveStrategyTags(product) {
 }
 
 function getProductProfile(product) {
+  if (product?.holding_bucket || product?.risk_bucket || product?.strategy_tags) {
+    return {
+      holdingBucket: product.holding_bucket || extractHoldingBucket(product.fund_name),
+      riskBucket: product.risk_bucket || extractRiskBucket(product.fund_name),
+      tags: Array.isArray(product.strategy_tags) && product.strategy_tags.length ? product.strategy_tags.slice(0, 4) : deriveStrategyTags(product),
+    };
+  }
   return {
     holdingBucket: extractHoldingBucket(product.fund_name),
     riskBucket: extractRiskBucket(product.fund_name),
     tags: deriveStrategyTags(product),
   };
+}
+
+function getProductSegmentKey(product) {
+  return product?.strategy_segment_key || `${product.fof_type}|${getProductProfile(product).riskBucket}|${getProductProfile(product).holdingBucket}|${/ETF-FOF/i.test(product.fund_name) ? "ETF" : "STD"}`;
+}
+
+function getMarketSegmentSnapshot(product) {
+  const segmentKey = getProductSegmentKey(product);
+  const peerProducts = state.data.products.filter((item) => getProductSegmentKey(item) === segmentKey && item.fund_company !== "华夏");
+  const huaxiaProducts = state.data.products.filter((item) => getProductSegmentKey(item) === segmentKey && item.fund_company === "华夏");
+  const peerKeyCompanies = [...new Set(peerProducts.filter((item) => item.is_key_company).map((item) => item.fund_company))];
+  const peerInReview = peerProducts.filter(isInReviewProduct);
+  const huaxiaInReview = huaxiaProducts.filter(isInReviewProduct);
+  const stockRows = getStockMatrixProducts((item) => item.strategy_segment_key === segmentKey);
+  const huaxiaStock = stockRows.filter((item) => item.fund_company === "华夏");
+  const peerStockCompanies = [...new Set(stockRows.filter((item) => item.fund_company !== "华夏").map((item) => item.fund_company))];
+  const alert =
+    (state.data.summary.strategy_density?.alerts || []).find((item) => item.segment_key === segmentKey) || null;
+  return {
+    segmentKey,
+    segmentLabel: product.strategy_segment_label || `${product.fof_type} · ${getProductProfile(product).riskBucket} · ${getProductProfile(product).holdingBucket}`,
+    peerKeyCompanies,
+    peerInReviewCount: peerInReview.length,
+    huaxiaInReviewCount: huaxiaInReview.length,
+    huaxiaStockCount: huaxiaStock.length,
+    peerStockCompanyCount: peerStockCompanies.length,
+    alert,
+  };
+}
+
+function getFuturePrediction(product) {
+  const future = state.data.summary.future_timeline || {};
+  const events = future.events || [];
+  const overdue = future.overdue || [];
+  return events.find((item) => item.product_id === product.product_id) || overdue.find((item) => item.product_id === product.product_id) || null;
+}
+
+function getHolderStructureGuess(product) {
+  const text = String(product.fund_name || "");
+  const profile = getProductProfile(product);
+  if (/发起式/.test(text)) {
+    return {
+      label: "机构 / 自有资金导向",
+      note: "名称含“发起式”，更可能由机构或管理人资金先行支持。",
+    };
+  }
+  if (profile.riskBucket === "养老") {
+    return {
+      label: "养老长期资金导向",
+      note: "养老标签通常对应长期配置与养老客群，不以短期交易型申购为主。",
+    };
+  }
+  if (profile.holdingBucket === "3个月持有" || profile.holdingBucket === "6个月持有") {
+    return {
+      label: "零售渠道概率更高",
+      note: "持有期约束 + 平衡/稳健标签更常见于面向零售渠道的产品设计。",
+    };
+  }
+  return {
+    label: "综合配置客群",
+    note: "当前更像面向中长期配置客群，仍需结合招募说明书和发行安排确认。",
+  };
+}
+
+function getSoftIntelSnapshot(product) {
+  const holderGuess = getHolderStructureGuess(product);
+  const segment = getMarketSegmentSnapshot(product);
+  return {
+    launchChannels: product.launch_channels || "待补充",
+    channelStatus: product.channel_status || "待补充",
+    holderView: product.holder_structure_view || holderGuess.label,
+    holderNote: product.holder_structure_view ? product.intel_note || "该结论来自手工维护的软信息模板。" : holderGuess.note,
+    underlyingPreference:
+      product.underlying_preference || (segment.alert ? "建议优先补齐该赛道底层池与竞品基池映射" : "待补充"),
+    poolAction:
+      product.underlying_pool_action ||
+      (segment.alert ? segment.alert.suggestion_brief : "可在软信息模板中补充底层池准备建议。"),
+    intelligenceLevel: product.intelligence_level || (product.launch_channels || product.underlying_preference ? "已维护" : "规则预判"),
+    lastUpdate: product.intel_last_update || null,
+  };
+}
+
+function getMacroToneClass(tone) {
+  return tone ? `is-${tone}` : "";
 }
 
 function getSimilarityScore(source, target) {
@@ -392,24 +508,24 @@ function getRegimeEstimates(product) {
   const profile = getProductProfile(product);
   const stableMap = {
     养老: {
-      boom: { returnBand: "4%~7%", drawdown: "-3%~-5%", note: "养老 FOF 更强调长期稳健增值和回撤约束，进攻性通常最低。" },
-      range: { returnBand: "3%~5%", drawdown: "-2%~-4%", note: "震荡期更看重资产配置与下行控制，体验通常比普通稳健型更平滑。" },
-      stress: { returnBand: "0%~2%", drawdown: "-2%~-4%", note: "风险偏好走弱时通常以防守为主，但也意味着修复速度偏慢。" },
+      boom: { returnBand: "4%~7%", drawdown: "-3%~-5%", winRate: "46%", note: "养老 FOF 更强调长期稳健增值和回撤约束，进攻性通常最低。" },
+      range: { returnBand: "3%~5%", drawdown: "-2%~-4%", winRate: "61%", note: "震荡期更看重资产配置与下行控制，体验通常比普通稳健型更平滑。" },
+      stress: { returnBand: "0%~2%", drawdown: "-2%~-4%", winRate: "74%", note: "风险偏好走弱时通常以防守为主，但也意味着修复速度偏慢。" },
     },
     稳健: {
-      boom: { returnBand: "5%~8%", drawdown: "-4%~-6%", note: "权益弹性较弱，偏重防守与波动控制。" },
-      range: { returnBand: "4%~6%", drawdown: "-3%~-5%", note: "震荡期通常更稳，适合承接绝对收益诉求。" },
-      stress: { returnBand: "1%~3%", drawdown: "-2%~-4%", note: "回撤弹性相对有限，但进攻能力也会受约束。" },
+      boom: { returnBand: "5%~8%", drawdown: "-4%~-6%", winRate: "42%", note: "权益弹性较弱，偏重防守与波动控制。" },
+      range: { returnBand: "4%~6%", drawdown: "-3%~-5%", winRate: "59%", note: "震荡期通常更稳，适合承接绝对收益诉求。" },
+      stress: { returnBand: "1%~3%", drawdown: "-2%~-4%", winRate: "69%", note: "回撤弹性相对有限，但进攻能力也会受约束。" },
     },
     平衡: {
-      boom: { returnBand: "7%~12%", drawdown: "-6%~-9%", note: "权益与固收并行，顺风期具备跟涨能力。" },
-      range: { returnBand: "4%~8%", drawdown: "-4%~-7%", note: "多资产与多元配置更依赖选基和仓位切换。" },
-      stress: { returnBand: "-2%~3%", drawdown: "-6%~-10%", note: "若底层风险资产占比不低，回撤仍需关注。" },
+      boom: { returnBand: "7%~12%", drawdown: "-6%~-9%", winRate: "58%", note: "权益与固收并行，顺风期具备跟涨能力。" },
+      range: { returnBand: "4%~8%", drawdown: "-4%~-7%", winRate: "53%", note: "多资产与多元配置更依赖选基和仓位切换。" },
+      stress: { returnBand: "-2%~3%", drawdown: "-6%~-10%", winRate: "38%", note: "若底层风险资产占比不低，回撤仍需关注。" },
     },
     积极: {
-      boom: { returnBand: "10%~16%", drawdown: "-8%~-12%", note: "更偏权益弹性，顺风期抢份额能力更强。" },
-      range: { returnBand: "3%~8%", drawdown: "-7%~-11%", note: "震荡期容易回吐，考验择时与底层风格。" },
-      stress: { returnBand: "-5%~1%", drawdown: "-10%~-15%", note: "风险偏好回落时承压更明显，需要更强风控。" },
+      boom: { returnBand: "10%~16%", drawdown: "-8%~-12%", winRate: "68%", note: "更偏权益弹性，顺风期抢份额能力更强。" },
+      range: { returnBand: "3%~8%", drawdown: "-7%~-11%", winRate: "41%", note: "震荡期容易回吐，考验择时与底层风格。" },
+      stress: { returnBand: "-5%~1%", drawdown: "-10%~-15%", winRate: "24%", note: "风险偏好回落时承压更明显，需要更强风控。" },
     },
   };
   return stableMap[profile.riskBucket] || stableMap.平衡;
@@ -567,6 +683,8 @@ function renderHero() {
   const huaxiaPipeline = state.data.products.filter((item) => item.fund_company === "华夏" && isInReviewProduct(item)).length;
   const stockProfile = getStockScaleProfile();
   const huaxiaStock = getStockCompanyStats("华夏");
+  const density = summary.strategy_density || {};
+  const future = summary.future_timeline || {};
   document.getElementById("hero-subtitle").textContent =
     `当前展示 ${prefix} FOF 竞品情报，统计区间为 ${range.start} 至 ${range.end}，重点盯紧新申报与华夏对标差距。`;
   document.getElementById("hero-pills").innerHTML = [
@@ -574,6 +692,8 @@ function renderHero() {
     `跟踪产品 ${state.data.products.length} 只`,
     `${prefix}新申报 ${topSignals} 只`,
     `华夏在途 ${huaxiaPipeline} 只`,
+    density.alert_count != null ? `密集赛道提醒 ${density.alert_count} 个` : null,
+    future.events ? `未来30天预测 ${future.events.length} 个` : null,
     stockProfile ? `存量FOF ${stockProfile.product_count} 只` : null,
     stockProfile ? `存量规模 ${fmtNum(stockProfile.total_latest_scale)} 亿元` : null,
     huaxiaStock ? `华夏存量 #${huaxiaStock.rank} · ${fmtNum(huaxiaStock.latest_scale_sum)} 亿元` : null,
@@ -613,6 +733,340 @@ function renderKPIs() {
       `
     )
     .join("");
+}
+
+function renderWatchControls() {
+  const container = document.getElementById("watch-company-list");
+  if (!container) return;
+  const companies = state.data.config.key_companies || [];
+  container.innerHTML = `
+    <div class="watch-chip-list">
+      ${companies
+        .map(
+          (company) => `
+            <button class="watch-chip ${isWatchedCompany(company) ? "is-active" : ""}" data-watch-company="${escapeHtml(company)}" type="button">
+              ${escapeHtml(company)}
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+    <div class="watch-summary">${
+      state.watchCompanies.length
+        ? `当前已订阅 ${state.watchCompanies.join("、")}。后续 snapshot 更新后，这里会优先抬出这些公司的新节点。`
+        : "点击公司即可加入订阅名单；订阅状态保存在浏览器本地。"
+    }</div>
+  `;
+  container.querySelectorAll("[data-watch-company]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const company = button.dataset.watchCompany;
+      state.watchCompanies = isWatchedCompany(company)
+        ? state.watchCompanies.filter((item) => item !== company)
+        : [...state.watchCompanies, company];
+      persistWatchCompanies();
+      renderWatchControls();
+      renderWatchFeed();
+      renderSignalRadar();
+      renderKeyProducts();
+    });
+  });
+}
+
+function renderWatchFeed() {
+  const container = document.getElementById("watch-feed");
+  if (!container) return;
+  if (!state.watchCompanies.length) {
+    container.innerHTML = `<div class="empty-box">尚未订阅公司，先在上方点选关注对象。</div>`;
+    return;
+  }
+  const rows = state.data.products
+    .filter((item) => state.watchCompanies.includes(item.fund_company))
+    .sort((a, b) => String(b.latest_event_date || "").localeCompare(String(a.latest_event_date || "")))
+    .slice(0, 6);
+  container.innerHTML = rows.length
+    ? `<div class="watch-feed-list">${rows
+        .map((row) => {
+          const critical = ["已获批", "发行中"].includes(row.current_stage) || getThreatBadge(row).tone === "alert";
+          return `
+            <div class="watch-feed-item clickable-row ${critical ? "is-critical" : ""}" data-product-id="${escapeHtml(row.product_id)}">
+              <div class="watch-feed-top">
+                <div class="watch-feed-name">${escapeHtml(row.fund_name)}</div>
+                <span class="pill">${escapeHtml(row.current_stage)}</span>
+              </div>
+              <div class="watch-feed-meta">${escapeHtml(row.fund_company)} · 最新日期 ${fmtDate(row.latest_event_date)} · ${escapeHtml(
+                getHuaxiaBenchmarkInsight(row).headline
+              )}</div>
+            </div>
+          `;
+        })
+        .join("")}</div>`
+    : `<div class="empty-box">当前订阅公司尚无可展示动作。</div>`;
+  bindClickableRows(container);
+}
+
+function renderForecastTimeline() {
+  const container = document.getElementById("forecast-timeline");
+  if (!container) return;
+  const future = state.data.summary.future_timeline || {};
+  const events = future.events || [];
+  const overdue = future.overdue || [];
+  if (!events.length && !overdue.length) {
+    container.innerHTML = `<div class="empty-box">当前样本不足，暂未形成未来 30 天的节点预测。</div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div class="forecast-list">
+      ${events
+        .map((item) => {
+          const label = String(item.predicted_date || "—").slice(5);
+          const watched = isWatchedCompany(item.fund_company);
+          return `
+            <div class="forecast-item clickable-row" data-product-id="${escapeHtml(item.product_id)}">
+              <div class="forecast-date">
+                <strong>${escapeHtml(label || "—")}</strong>
+                <span>${escapeHtml(item.predicted_stage_label)}</span>
+              </div>
+              <div class="forecast-copy">
+                <strong>${escapeHtml(item.fund_name)}</strong>
+                <div class="forecast-meta">${escapeHtml(item.fund_company)} · 当前 ${escapeHtml(item.current_stage)} · ${escapeHtml(
+                  item.strategy_segment_label
+                )}</div>
+                <div class="forecast-badges">
+                  <span class="info-chip">${escapeHtml(item.benchmark_source || "样本不足")}</span>
+                  <span class="info-chip">估算 ${escapeHtml(item.benchmark_days)} 天</span>
+                  <span class="info-chip">${item.confidence === "high" ? "高置信" : item.confidence === "medium" ? "中置信" : "低置信"}</span>
+                  ${watched ? `<span class="severity-chip watch">已订阅</span>` : ""}
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
+      ${
+        overdue.length
+          ? `<div class="watch-summary">另有 ${escapeHtml(
+              overdue.length
+            )} 只产品已超过常规节奏但尚未进入下一阶段，优先在“审批效能堵点诊断”中查看。</div>`
+          : ""
+      }
+    </div>
+  `;
+  bindClickableRows(container);
+}
+
+function renderDensityAlerts() {
+  const container = document.getElementById("density-alerts");
+  if (!container) return;
+  const dashboard = state.data.summary.strategy_density || {};
+  const alerts = dashboard.alerts || [];
+  if (!alerts.length) {
+    container.innerHTML = `<div class="empty-box">${escapeHtml(dashboard.headline || "当前没有触发密集赛道提醒。")}</div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div class="density-list">
+      <div class="watch-summary">${escapeHtml(dashboard.headline || "")}</div>
+      ${alerts
+        .map(
+          (alert) => `
+            <div class="density-item">
+              <div class="density-copy">
+                <strong>${escapeHtml(alert.suggestion_title)}</strong>
+                <div class="density-badges">
+                  <span class="severity-chip ${escapeHtml(alert.severity)}">${escapeHtml(alert.severity_label)}</span>
+                  <span class="info-chip">头部公司 ${escapeHtml(alert.density_count)} 家</span>
+                  <span class="info-chip">同业在途 ${escapeHtml(alert.peer_in_review_count)} 只</span>
+                  <span class="info-chip">${escapeHtml(alert.gap_label)}</span>
+                </div>
+                <div class="density-meta">${escapeHtml(alert.suggestion_brief)}</div>
+                ${
+                  (alert.top_products || []).length
+                    ? `<div class="mini-list" style="margin-top:10px;">${alert.top_products
+                        .map(
+                          (item) => `
+                            <div class="mini-item clickable-row" data-product-id="${escapeHtml(item.product_id)}">
+                              <div class="mini-top">
+                                <div class="mini-name">${escapeHtml(item.fund_name)}</div>
+                                <span class="pill">${escapeHtml(item.current_stage)}</span>
+                              </div>
+                              <div class="mini-meta">${escapeHtml(item.fund_company)} · ${fmtDate(item.latest_event_date)}</div>
+                            </div>
+                          `
+                        )
+                        .join("")}</div>`
+                    : ""
+                }
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  bindClickableRows(container);
+}
+
+function renderMacroClock() {
+  const container = document.getElementById("macro-clock");
+  if (!container) return;
+  const macro = state.data.summary.macro_clock || {};
+  if (!macro.configured) {
+    container.innerHTML = `
+      <div class="macro-stack">
+        <div class="macro-card">
+          <div class="macro-regime">
+            <span>当前状态</span>
+            <strong>投资时钟阶段待配置</strong>
+          </div>
+          <p>${escapeHtml(macro.note || "可在配置中指定当前宏观阶段。")}</p>
+          <div class="macro-badges">
+            ${(macro.available_regimes || []).map((item) => `<span class="info-chip">${escapeHtml(item)}</span>`).join("")}
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  container.innerHTML = `
+    <div class="macro-stack">
+      <div class="macro-card ${getMacroToneClass(macro.tone)}">
+        <div class="macro-regime">
+          <span>当前宏观阶段</span>
+          <strong>${escapeHtml(macro.current_regime)}</strong>
+        </div>
+        <p>${escapeHtml(macro.description || "")}</p>
+        <div class="macro-badges">
+          <span class="info-chip">命中产品 ${escapeHtml(macro.matched_product_count || 0)} 只</span>
+          <span class="info-chip">命中赛道提醒 ${escapeHtml(macro.matched_alert_count || 0)} 个</span>
+        </div>
+        <p>${escapeHtml(macro.action_hint || "")}</p>
+      </div>
+      ${
+        (macro.matched_products || []).length
+          ? `<div class="mini-list">${macro.matched_products
+              .map(
+                (item) => `
+                  <div class="mini-item clickable-row" data-product-id="${escapeHtml(item.product_id)}">
+                    <div class="mini-top">
+                      <div class="mini-name">${escapeHtml(item.fund_name)}</div>
+                      <span class="pill">${escapeHtml(item.current_stage)}</span>
+                    </div>
+                    <div class="mini-meta">${escapeHtml(item.fund_company)} · ${escapeHtml(item.strategy_segment_label || "")}</div>
+                  </div>
+                `
+              )
+              .join("")}</div>`
+          : `<div class="empty-box">当前阶段下暂无需要额外高亮的在途产品。</div>`
+      }
+    </div>
+  `;
+  bindClickableRows(container);
+}
+
+function renderSoftIntelBoard() {
+  const container = document.getElementById("soft-intel-board");
+  if (!container) return;
+  const dashboard = state.data.summary.soft_intel_dashboard || {};
+  const updates = dashboard.key_updates || [];
+  const missingPriority = dashboard.missing_priority || [];
+  const channelBuckets = dashboard.channel_buckets || [];
+  const holderBuckets = dashboard.holder_buckets || [];
+  if (!dashboard.coverage_count) {
+    container.innerHTML = `
+      <div class="macro-stack">
+        <div class="macro-card">
+          <div class="macro-regime">
+            <span>当前状态</span>
+            <strong>尚未录入发行软信息</strong>
+          </div>
+          <p>${escapeHtml(dashboard.headline || "当前没有可展示的软信息覆盖。")}</p>
+          <div class="macro-badges">
+            <span class="info-chip">${escapeHtml(dashboard.source_file || "fof_soft_signal_template.csv")}</span>
+            <span class="info-chip">可补渠道 / 持有人 / 底层偏好</span>
+          </div>
+        </div>
+        ${
+          missingPriority.length
+            ? `<div class="mini-list">${missingPriority
+                .map(
+                  (item) => `
+                    <div class="mini-item clickable-row" data-product-id="${escapeHtml(item.product_id)}">
+                      <div class="mini-top">
+                        <div class="mini-name">${escapeHtml(item.fund_name)}</div>
+                        <span class="pill">待补软信息</span>
+                      </div>
+                      <div class="mini-meta">${escapeHtml(item.fund_company)} · ${escapeHtml(item.current_stage)} · 最新日期 ${fmtDate(
+                        item.latest_event_date
+                      )}</div>
+                    </div>
+                  `
+                )
+                .join("")}</div>`
+            : ""
+        }
+      </div>
+    `;
+    bindClickableRows(container);
+    return;
+  }
+  container.innerHTML = `
+    <div class="macro-stack">
+      <div class="macro-card">
+        <div class="macro-regime">
+          <span>覆盖概览</span>
+          <strong>${escapeHtml(dashboard.coverage_count)} 只产品已录入软信息</strong>
+        </div>
+        <p>${escapeHtml(dashboard.headline || "")}</p>
+        <div class="macro-badges">
+          <span class="info-chip">渠道覆盖 ${escapeHtml(dashboard.channel_cover_count || 0)} 只</span>
+          <span class="info-chip">持有人结构 ${escapeHtml(dashboard.holder_cover_count || 0)} 只</span>
+          <span class="info-chip">底层偏好 ${escapeHtml(dashboard.preference_cover_count || 0)} 只</span>
+          <span class="info-chip">华夏覆盖 ${escapeHtml(dashboard.focus_company_cover_count || 0)} 只</span>
+        </div>
+      </div>
+      ${
+        channelBuckets.length || holderBuckets.length
+          ? `<div class="density-list">
+              ${
+                channelBuckets.length
+                  ? `<div class="density-item"><div class="density-copy"><strong>渠道热点</strong><div class="density-badges">${channelBuckets
+                      .map((item) => `<span class="info-chip">${escapeHtml(item.label)} ${escapeHtml(item.count)}</span>`)
+                      .join("")}</div></div></div>`
+                  : ""
+              }
+              ${
+                holderBuckets.length
+                  ? `<div class="density-item"><div class="density-copy"><strong>持有人结构</strong><div class="density-badges">${holderBuckets
+                      .map((item) => `<span class="info-chip">${escapeHtml(item.label)} ${escapeHtml(item.count)}</span>`)
+                      .join("")}</div></div></div>`
+                  : ""
+              }
+            </div>`
+          : ""
+      }
+      ${
+        updates.length
+          ? `<div class="mini-list">${updates
+              .map((item) => {
+                const soft = getSoftIntelSnapshot(item);
+                return `
+                  <div class="mini-item clickable-row" data-product-id="${escapeHtml(item.product_id)}">
+                    <div class="mini-top">
+                      <div class="mini-name">${escapeHtml(item.fund_name)}</div>
+                      <span class="pill">${escapeHtml(soft.intelligenceLevel)}</span>
+                    </div>
+                    <div class="mini-meta">${escapeHtml(item.fund_company)} · 渠道 ${escapeHtml(soft.launchChannels)} · 持有人 ${escapeHtml(
+                      soft.holderView
+                    )}${soft.lastUpdate ? ` · 更新 ${fmtDate(soft.lastUpdate)}` : ""}</div>
+                  </div>
+                `;
+              })
+              .join("")}</div>`
+          : ""
+      }
+    </div>
+  `;
+  bindClickableRows(container);
 }
 
 function renderPipeline() {
@@ -755,6 +1209,7 @@ function renderSignalRadar() {
             <div class="signal-topline">
               <div class="signal-badges">
                 <span class="signal-badge ${badge.tone}">${escapeHtml(badge.label)}</span>
+                ${isWatchedCompany(product.fund_company) ? `<span class="signal-badge focus">已订阅</span>` : ""}
                 ${product.is_key_company ? `<span class="signal-badge subtle">重点公司</span>` : ""}
               </div>
               <div class="signal-chevron">&gt;</div>
@@ -1163,7 +1618,7 @@ function renderInReviewPool() {
       <div class="mini-item clickable-row" data-product-id="${escapeHtml(row.product_id)}">
         <div class="mini-top">
           <div class="mini-name">${escapeHtml(row.fund_name)}</div>
-          <span class="pill">${escapeHtml(getThreatBadge(row).label)}</span>
+          <span class="pill">${escapeHtml(isWatchedCompany(row.fund_company) ? `${getThreatBadge(row).label} · 已订阅` : getThreatBadge(row).label)}</span>
         </div>
         <div class="mini-meta">${escapeHtml(row.fund_company)} · ${escapeHtml(row.current_stage)} · 已停留 ${escapeHtml(row.days_in_stage)} 天</div>
         <div class="mini-step-wrap">${buildStepTrackerMarkup(row, true)}</div>
@@ -1261,7 +1716,7 @@ function renderKeyProducts() {
             <div class="key-product-item clickable-row" data-product-id="${escapeHtml(row.product_id)}">
               <div class="item-top">
                 <div class="item-name">${escapeHtml(row.fund_name)}</div>
-                <span class="pill">${escapeHtml(getThreatBadge(row).label)}</span>
+                <span class="pill">${escapeHtml(isWatchedCompany(row.fund_company) ? `${getThreatBadge(row).label} · 已订阅` : getThreatBadge(row).label)}</span>
               </div>
               <div class="item-meta">${escapeHtml(row.fund_company)} · ${escapeHtml(row.current_stage)} · 最新日期 ${fmtDate(
                 row.latest_event_date
@@ -1764,8 +2219,10 @@ function renderStockScaleProfile() {
 
 function renderHuaxiaChase() {
   const dashboard = state.data.summary.huaxia_chase;
+  const efficiency = state.data.summary.efficiency_diagnosis || {};
   const kpiContainer = document.getElementById("chase-kpi-grid");
   const briefContainer = document.getElementById("chase-brief");
+  const diagnosisContainer = document.getElementById("chase-efficiency-diagnosis");
   const raceContainer = document.getElementById("chase-raceboard");
   const contextContainer = document.getElementById("chase-context");
   const tableContainer = document.getElementById("chase-table");
@@ -1773,6 +2230,7 @@ function renderHuaxiaChase() {
   if (!dashboard) {
     kpiContainer.innerHTML = `<div class="empty-box">暂无华夏追赶测算数据。</div>`;
     briefContainer.innerHTML = `<div class="empty-box">暂无华夏追赶测算数据。</div>`;
+    if (diagnosisContainer) diagnosisContainer.innerHTML = `<div class="empty-box">暂无审批效能诊断数据。</div>`;
     raceContainer.innerHTML = `<div class="empty-box">暂无头部公司对比数据。</div>`;
     contextContainer.innerHTML = `<div class="empty-box">暂无华夏储备数据。</div>`;
     tableContainer.innerHTML = `<div class="empty-box">暂无头部公司明细。</div>`;
@@ -1879,6 +2337,51 @@ function renderHuaxiaChase() {
       </div>
     </div>
   `;
+
+  if (diagnosisContainer) {
+    const stageRows = efficiency.stage_rows || [];
+    const laggingProducts = efficiency.lagging_products || [];
+    diagnosisContainer.innerHTML = stageRows.length
+      ? `
+        <div class="diagnosis-stage-grid">
+          <div class="watch-summary">${escapeHtml(efficiency.focus_summary || "")}</div>
+          ${stageRows
+            .map(
+              (row) => `
+                <div class="diagnosis-stage-card">
+                  <span>${escapeHtml(row.stage_label)}</span>
+                  <strong>${
+                    row.focus_avg_days != null ? `华夏 ${fmtNum(row.focus_avg_days)} 天` : "华夏样本不足"
+                  }</strong>
+                  <p>重点同业 ${
+                    row.benchmark_avg_days != null ? `${fmtNum(row.benchmark_avg_days)} 天` : "样本不足"
+                  } · ${escapeHtml(row.assessment)}${row.gap_days != null ? ` · 差值 ${fmtSignedNum(row.gap_days)} 天` : ""}</p>
+                </div>
+              `
+            )
+            .join("")}
+          ${
+            laggingProducts.length
+              ? `<div class="diagnosis-product-list">${laggingProducts
+                  .map(
+                    (item) => `
+                      <div class="diagnosis-product-item clickable-row" data-product-id="${escapeHtml(item.product_id)}">
+                        <span>华夏待跟进产品</span>
+                        <strong>${escapeHtml(item.fund_name)}</strong>
+                        <p>${escapeHtml(item.current_stage)} · 已停留 ${escapeHtml(item.days_in_stage ?? "—")} 天 · 最新日期 ${fmtDate(
+                          item.latest_event_date
+                        )}</p>
+                      </div>
+                    `
+                  )
+                  .join("")}</div>`
+              : ""
+          }
+        </div>
+      `
+      : `<div class="empty-box">当前样本不足，暂未形成审批效能对比。</div>`;
+    bindClickableRows(diagnosisContainer);
+  }
 
   const raceRows = dashboard.head_companies || [];
   if (!raceRows.length) {
@@ -1993,11 +2496,15 @@ function buildDiagnosisMarkup(product, mode = "page") {
   const peers = getPeerProducts(product, 3);
   const threat = getThreatBadge(product);
   const regimes = getRegimeEstimates(product);
+  const segment = getMarketSegmentSnapshot(product);
+  const holderGuess = getHolderStructureGuess(product);
+  const forecast = getFuturePrediction(product);
+  const softIntel = getSoftIntelSnapshot(product);
   const timelineRows = [
     { stage: "新申报", date: product.declare_date, note: "材料接收" },
     { stage: "新受理", date: product.accept_date, note: product.declare_to_accept_days != null ? `申报到受理 ${product.declare_to_accept_days} 天` : "进入监管受理流程" },
     { stage: "已获批", date: product.approval_date, note: product.accept_to_approval_days != null ? `受理到获批 ${product.accept_to_approval_days} 天` : "尚未形成获批样本" },
-    { stage: "发行中", date: product.issue_start_date, note: "进入募集阶段" },
+    { stage: "发行中", date: product.issue_start_date, note: product.approval_to_issue_days != null ? `获批到发行 ${product.approval_to_issue_days} 天` : "进入募集阶段" },
     { stage: "已成立", date: product.establish_date, note: product.issue_to_establish_days != null ? `发行到成立 ${product.issue_to_establish_days} 天` : "尚未成立或暂无耗时数据" },
   ];
   return `
@@ -2034,6 +2541,14 @@ function buildDiagnosisMarkup(product, mode = "page") {
             <div class="detail-side-item">
               <span>风格刻画</span>
               <strong>${escapeHtml(profile.riskBucket)} · ${escapeHtml(profile.holdingBucket)}</strong>
+            </div>
+            <div class="detail-side-item">
+              <span>下一节点预测</span>
+              <strong>${
+                forecast
+                  ? `${escapeHtml(forecast.predicted_stage_label)} · ${fmtDate(forecast.predicted_date)}`
+                  : "当前暂无可用预测"
+              }</strong>
             </div>
             <div class="detail-side-item">
               <span>备注</span>
@@ -2082,12 +2597,22 @@ function buildDiagnosisMarkup(product, mode = "page") {
                 <strong>${escapeHtml(profile.riskBucket)} 型，${escapeHtml(profile.holdingBucket)} 约束，${/ETF-FOF/i.test(product.fund_name) ? "工具化程度较高" : "更依赖底层多资产配置"}</strong>
               </div>
               <div class="strategy-point">
-                <span>竞品含义</span>
-                <strong>${escapeHtml(insight.tone === "alert" ? "当前属于华夏空白卡位，应重点盯防。" : "华夏已有对标，可重点比效率和发行窗口。")}</strong>
+                <span>赛道密度与华夏覆盖</span>
+                <strong>${escapeHtml(
+                  segment.alert
+                    ? `${segment.segmentLabel} 已触发${segment.alert.severity_label}，重点公司 ${segment.peerKeyCompanies.length} 家、同业在途 ${segment.peerInReviewCount} 只；华夏在途 ${segment.huaxiaInReviewCount} 只、存量 ${segment.huaxiaStockCount} 只。`
+                    : `${segment.segmentLabel} 当前重点公司 ${segment.peerKeyCompanies.length} 家、同业在途 ${segment.peerInReviewCount} 只；华夏在途 ${segment.huaxiaInReviewCount} 只、存量 ${segment.huaxiaStockCount} 只。`
+                )}</strong>
               </div>
               <div class="strategy-point">
-                <span>同类样本</span>
-                <strong>${peers.length ? peers.map((item) => item.fund_company).join("、") : "暂未识别到明显同类竞品"}</strong>
+                <span>持有人结构预判</span>
+                <strong>${escapeHtml(holderGuess.label)}。${escapeHtml(holderGuess.note)}</strong>
+              </div>
+              <div class="strategy-point">
+                <span>变相对标样本</span>
+                <strong>${escapeHtml(
+                  peers.length ? `${peers.map((item) => item.fund_company).join("、")} 等公司已有可比样本，可直接做策略对标。` : "暂未识别到明显同类竞品。"
+                )}</strong>
               </div>
             </div>
           </div>
@@ -2104,19 +2629,19 @@ function buildDiagnosisMarkup(product, mode = "page") {
             <div class="regime-card">
               <span>风险偏好抬升</span>
               <strong>${escapeHtml(regimes.boom.returnBand)}</strong>
-              <em>预估最大回撤 ${escapeHtml(regimes.boom.drawdown)}</em>
+              <em>预估胜率 ${escapeHtml(regimes.boom.winRate)} · 最大回撤 ${escapeHtml(regimes.boom.drawdown)}</em>
               <p>${escapeHtml(regimes.boom.note)}</p>
             </div>
             <div class="regime-card">
               <span>震荡换手</span>
               <strong>${escapeHtml(regimes.range.returnBand)}</strong>
-              <em>预估最大回撤 ${escapeHtml(regimes.range.drawdown)}</em>
+              <em>预估胜率 ${escapeHtml(regimes.range.winRate)} · 最大回撤 ${escapeHtml(regimes.range.drawdown)}</em>
               <p>${escapeHtml(regimes.range.note)}</p>
             </div>
             <div class="regime-card">
               <span>风险偏好回落</span>
               <strong>${escapeHtml(regimes.stress.returnBand)}</strong>
-              <em>预估最大回撤 ${escapeHtml(regimes.stress.drawdown)}</em>
+              <em>预估胜率 ${escapeHtml(regimes.stress.winRate)} · 最大回撤 ${escapeHtml(regimes.stress.drawdown)}</em>
               <p>${escapeHtml(regimes.stress.note)}</p>
             </div>
           </div>
@@ -2126,8 +2651,24 @@ function buildDiagnosisMarkup(product, mode = "page") {
       <div class="detail-card">
         <div class="section-head compact">
           <div>
-            <h2 style="font-size:18px;">同类竞品与流程邻近样本</h2>
-            <p>用于快速看外部同类在什么公司、什么阶段、推进到哪里。</p>
+            <h2 style="font-size:18px;">发行软信息与同类样本</h2>
+            <p>先看拟发渠道、持有人结构和底层偏好，再看外部同类推进到哪里。</p>
+          </div>
+        </div>
+        <div class="strategy-copy" style="margin-bottom:14px;">
+          <div class="strategy-point">
+            <span>拟发渠道</span>
+            <strong>${escapeHtml(softIntel.launchChannels)}${softIntel.channelStatus !== "待补充" ? ` · ${escapeHtml(softIntel.channelStatus)}` : ""}</strong>
+          </div>
+          <div class="strategy-point">
+            <span>持有人结构预判</span>
+            <strong>${escapeHtml(softIntel.holderView)}</strong>
+            <div class="peer-meta">${escapeHtml(softIntel.holderNote)}</div>
+          </div>
+          <div class="strategy-point">
+            <span>底层选基偏好 / 底层池建议</span>
+            <strong>${escapeHtml(softIntel.underlyingPreference)}</strong>
+            <div class="peer-meta">${escapeHtml(softIntel.poolAction)}</div>
           </div>
         </div>
         ${
@@ -2282,6 +2823,12 @@ function renderAll() {
   renderRailNav();
   renderHero();
   renderKPIs();
+  renderWatchControls();
+  renderWatchFeed();
+  renderForecastTimeline();
+  renderDensityAlerts();
+  renderMacroClock();
+  renderSoftIntelBoard();
   renderPipeline();
   renderBattlefield();
   populateMonitorFilters();
@@ -2306,6 +2853,7 @@ function renderAll() {
 getData()
   .then((data) => {
     state.data = data;
+    state.watchCompanies = loadWatchCompanies();
     wireEvents();
     renderAll();
   })
