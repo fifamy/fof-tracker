@@ -1,16 +1,20 @@
 const state = {
   data: null,
-  activeTab: "overview",
+  activeTab: "dashboard",
   companyPeriod: "week",
   companyScope: "all",
   topPeriod: "week",
   battlefieldTab: "launch",
   selectedProductId: null,
   drawerOpen: false,
+  globalSlice: "all",
+  kpiDrill: null,
+  keyProductsView: "list",
+  forecastView: "gantt",
   watchCompanies: [],
   monitorFilters: {
     company: "",
-    stage: "新申报",
+    stage: "auto",
     search: "",
     sort: "threat",
   },
@@ -27,14 +31,22 @@ const state = {
 const STAGE_FLOW = ["新申报", "新受理", "已获批", "发行中", "已成立"];
 const WATCH_STORAGE_KEY = "fof-tracker-watch-companies";
 const RAIL_NAV_ITEMS = [
-  { tab: "overview", label: "首页总览", note: "情报主屏" },
-  { tab: "tracker", label: "流程跟踪", note: "全量检索" },
-  { tab: "companies", label: "公司竞争格局", note: "同业动作" },
-  { tab: "key", label: "重点公司对比", note: "重点名单" },
-  { tab: "stock", label: "存量FOF规模", note: "最新规模" },
-  { tab: "chase", label: "华夏追赶测算", note: "差距测算" },
-  { tab: "detail", label: "产品详情", note: "单品诊断" },
+  { tab: "dashboard", label: "首页总览", note: "核心 KPI 与异动" },
+  { tab: "pipeline", label: "流程跟踪", note: "在审雷达 / 跟踪总表" },
+  { tab: "market", label: "公司格局", note: "对标与竞争分析" },
+  { tab: "scale", label: "存量与追赶", note: "存量规模 / 追赶测算" },
+  { tab: "intel", label: "智能简报", note: "密集布局 / 软信息" },
+  { tab: "detail", label: "产品详情", note: "单品穿透" },
 ];
+
+const TAB_HEADINGS = {
+  dashboard: { title: "首页总览", sub: "核心 KPI / 未来30天预测 / 近期趋势 / 重点异动" },
+  pipeline: { title: "流程跟踪", sub: "在审情报雷达 / 阶段动态 / 全量跟踪总表" },
+  market: { title: "公司格局", sub: "全景大盘 / 重点公司对比 / 竞争格局" },
+  scale: { title: "存量与追赶", sub: "最新规模画像 / 华夏追赶头部前三测算" },
+  intel: { title: "智能简报", sub: "密集布局 / 投资时钟 / 发行软信息" },
+  detail: { title: "产品详情", sub: "单品推进链路与耗时诊断" },
+};
 
 const BATTLEFIELD_TABS = [
   { key: "launch", label: "发行水位对标" },
@@ -199,6 +211,42 @@ function isInReviewProduct(product) {
   return isInReviewStage(product.current_stage);
 }
 
+const GLOBAL_SLICES = [
+  { key: "all", label: "全部", hint: "全市场视角" },
+  { key: "ordinary", label: "普通", hint: "普通 FOF" },
+  { key: "etf", label: "ETF-FOF", hint: "ETF 型 FOF" },
+  { key: "pension", label: "养老", hint: "养老 FOF" },
+  { key: "huaxia_gap", label: "华夏空白", hint: "竞品有布局 · 华夏尚无对标" },
+  { key: "huaxia_pipeline", label: "华夏在途", hint: "华夏当前推进中" },
+];
+
+function passesGlobalSlice(product) {
+  const slice = state.globalSlice || "all";
+  if (slice === "all") return true;
+  const type = String(product.fof_type || "");
+  if (slice === "ordinary") return type === "普通FOF";
+  if (slice === "etf") return type === "ETF-FOF";
+  if (slice === "pension") return type === "养老FOF";
+  if (slice === "huaxia_gap") {
+    if (product.fund_company === "华夏") return false;
+    try {
+      return getHuaxiaBenchmarkInsight(product).tone === "alert";
+    } catch (e) {
+      return false;
+    }
+  }
+  if (slice === "huaxia_pipeline") return product.fund_company === "华夏" && isInReviewProduct(product);
+  return true;
+}
+
+function sliceIsActive() {
+  return state.globalSlice && state.globalSlice !== "all";
+}
+
+function getSlicedProducts() {
+  return state.data.products.filter(passesGlobalSlice);
+}
+
 function extractHoldingBucket(name) {
   const text = String(name || "");
   if (/(九十天|90天|三个月|3个月)/.test(text)) return "3个月持有";
@@ -232,6 +280,9 @@ function deriveStrategyTags(product) {
   pushTag("稳健", /稳健|稳享|稳晖|稳盈|悦信稳健|安盈|安悦/);
   pushTag("平衡", /平衡|均衡/);
   pushTag("优选", /优选/);
+  pushTag("海外资产", /海外|全球|QDII|港股|跨境|环球|纳斯达克|标普|日经|恒生科技/i);
+  pushTag("黄金商品", /黄金|商品|原油|大宗商品|贵金属/i);
+  pushTag("REITs", /REIT|REITS|不动产投资信托/i);
   const holding = extractHoldingBucket(text);
   if (!tags.includes(holding) && holding !== "其他持有") tags.push(holding);
   if (!tags.includes(product.fof_type)) tags.push(product.fof_type);
@@ -254,7 +305,10 @@ function getProductProfile(product) {
 }
 
 function getProductSegmentKey(product) {
-  return product?.strategy_segment_key || `${product.fof_type}|${getProductProfile(product).riskBucket}|${getProductProfile(product).holdingBucket}|${/ETF-FOF/i.test(product.fund_name) ? "ETF" : "STD"}`;
+  if (product?.strategy_segment_key) return product.strategy_segment_key;
+  const profile = getProductProfile(product);
+  const theme = (product?.asset_theme_tags || profile.tags.filter((tag) => ["海外资产", "黄金商品", "REITs"].includes(tag)))[0] || "BASE";
+  return `${product.fof_type}|${profile.riskBucket}|${profile.holdingBucket}|${theme}|${/ETF-FOF/i.test(product.fund_name) ? "ETF" : "STD"}`;
 }
 
 function getMarketSegmentSnapshot(product) {
@@ -315,11 +369,45 @@ function getHolderStructureGuess(product) {
   };
 }
 
+function getPredictedChannel(product) {
+  const custodian = String(product.custodian || "");
+  const fundCompany = String(product.fund_company || "");
+  const manager = String(product.manager || "");
+  if (/工商银行|工行/.test(custodian)) return "工行主代销概率较高";
+  if (/建设银行|建行/.test(custodian)) return "建行主代销概率较高";
+  if (/农业银行|农行/.test(custodian)) return "农行主代销概率较高";
+  if (/中国银行|中行/.test(custodian)) return "中行主代销概率较高";
+  if (/招商银行|招行/.test(custodian)) return "招行零售渠道概率较高";
+  if (/交通银行|交行/.test(custodian)) return "交行渠道可重点跟踪";
+  if (/证券|中信建投|华泰|国泰君安|东方证券/.test(custodian)) return "券商自有渠道概率较高";
+  if (manager && /养老/.test(product.fund_name || "")) return `${manager} 相关养老客群渠道可重点跟踪`;
+  if (/华夏|易方达|汇添富|富国/.test(fundCompany)) return "大行 + 第三方平台双线推进概率较高";
+  return "待结合托管行与历史合作渠道补录";
+}
+
+function getDynamicHolderProbability(product) {
+  const segmentRows = state.data.products.filter(
+    (item) => item.current_stage === "已成立" && item.product_id !== product.product_id && getProductSegmentKey(item) === getProductSegmentKey(product)
+  );
+  const avgScale = average(segmentRows.map((item) => item.raise_scale));
+  if (/发起式/.test(product.fund_name || "")) {
+    return { label: "机构 / 自有资金概率高", note: "名称含“发起式”，通常更偏机构或管理人资金先行支持。", avgScale };
+  }
+  if (avgScale != null && avgScale >= 20) {
+    return { label: "机构定制概率偏高", note: `同赛道已成立样本平均募集约 ${fmtNum(avgScale)} 亿元，通常更偏机构承接。`, avgScale };
+  }
+  if (avgScale != null && avgScale <= 8) {
+    return { label: "零售渠道概率偏高", note: `同赛道已成立样本平均募集约 ${fmtNum(avgScale)} 亿元，更像零售主导型产品。`, avgScale };
+  }
+  return { label: getHolderStructureGuess(product).label, note: getHolderStructureGuess(product).note, avgScale };
+}
+
 function getSoftIntelSnapshot(product) {
-  const holderGuess = getHolderStructureGuess(product);
+  const holderGuess = getDynamicHolderProbability(product);
   const segment = getMarketSegmentSnapshot(product);
   return {
     launchChannels: product.launch_channels || "待补充",
+    predictedChannel: product.launch_channels ? null : getPredictedChannel(product),
     channelStatus: product.channel_status || "待补充",
     holderView: product.holder_structure_view || holderGuess.label,
     holderNote: product.holder_structure_view ? product.intel_note || "该结论来自手工维护的软信息模板。" : holderGuess.note,
@@ -330,6 +418,124 @@ function getSoftIntelSnapshot(product) {
       (segment.alert ? segment.alert.suggestion_brief : "可在软信息模板中补充底层池准备建议。"),
     intelligenceLevel: product.intelligence_level || (product.launch_channels || product.underlying_preference ? "已维护" : "规则预判"),
     lastUpdate: product.intel_last_update || null,
+  };
+}
+
+function getMacroMatch(product) {
+  const macro = state.data.summary.macro_clock || {};
+  if (!macro.configured) return false;
+  const profile = getProductProfile(product);
+  const tagSet = new Set(profile.tags);
+  return (
+    (macro.watch_risk_buckets || []).includes(profile.riskBucket) ||
+    (macro.watch_tags || []).some((tag) => tagSet.has(tag))
+  );
+}
+
+function resolveMonitorStageSelection(baseRows) {
+  if (state.monitorFilters.stage !== "auto") {
+    return {
+      stage: state.monitorFilters.stage,
+      label: state.monitorFilters.stage === "all" ? "全部在审" : state.monitorFilters.stage,
+      rows: state.monitorFilters.stage === "all" ? baseRows : baseRows.filter((item) => item.current_stage === state.monitorFilters.stage),
+    };
+  }
+  const staged = ["新申报", "新受理", "已获批", "发行中"].map((stage) => ({
+    stage,
+    rows: baseRows.filter((item) => item.current_stage === stage),
+  }));
+  const firstWithRows = staged.find((item) => item.rows.length);
+  if (firstWithRows?.stage === "新申报") {
+    return { stage: "新申报", label: "新申报", rows: firstWithRows.rows };
+  }
+  if (firstWithRows) {
+    return { stage: "all", label: `智能切换：${firstWithRows.stage}`, rows: baseRows };
+  }
+  return { stage: "all", label: "全部在审", rows: baseRows };
+}
+
+function getApprovalWindowInsight() {
+  const approvalRows = state.data.products
+    .filter((item) => item.approval_date)
+    .slice()
+    .sort((a, b) => String(a.approval_date || "").localeCompare(String(b.approval_date || "")));
+  const dates = [...new Set(approvalRows.map((item) => item.approval_date))];
+  if (dates.length < 2) return null;
+  const intervals = [];
+  for (let i = 1; i < dates.length; i += 1) {
+    const gap = daysBetween(dates[i - 1], dates[i]);
+    if (gap != null && gap > 0) intervals.push(gap);
+  }
+  const avgGap = average(intervals);
+  const lastDate = dates[dates.length - 1];
+  const nextDate = parseDate(lastDate);
+  if (!nextDate || avgGap == null) return null;
+  nextDate.setDate(nextDate.getDate() + Math.round(avgGap));
+  const predictedDate = nextDate.toISOString().slice(0, 10);
+  const dueProducts = (state.data.summary.future_timeline?.events || []).filter(
+    (item) => item.predicted_stage === "已获批" && Math.abs(daysBetween(item.predicted_date, predictedDate) || 999) <= 7
+  );
+  return {
+    avgGap,
+    lastDate,
+    predictedDate,
+    dueProducts,
+  };
+}
+
+function getDelayReasonHints(product) {
+  const hints = [];
+  const sameStageSegmentRows = state.data.products.filter(
+    (item) =>
+      item.product_id !== product.product_id &&
+      item.current_stage === product.current_stage &&
+      getProductSegmentKey(item) === getProductSegmentKey(product)
+  );
+  if (sameStageSegmentRows.length >= 3) {
+    hints.push(`同赛道同阶段还有 ${sameStageSegmentRows.length} 只产品排队，存在同质化反馈压力`);
+  }
+  if (product.custodian) {
+    const sameCustodianRows = state.data.products.filter(
+      (item) => item.product_id !== product.product_id && item.current_stage === product.current_stage && item.custodian === product.custodian
+    );
+    if (sameCustodianRows.length >= 2) {
+      hints.push(`${product.custodian} 同阶段仍有 ${sameCustodianRows.length} 只产品，可能存在托管/发行排期拥挤`);
+    }
+  }
+  if (product.current_stage === "已获批" && !product.launch_channels) {
+    hints.push("当前未录入拟发渠道，可能存在发行准备节奏偏慢");
+  }
+  if (product.current_stage === "新受理" && !product.theme_bucket && sameStageSegmentRows.length >= 2) {
+    hints.push("产品标签较集中，若缺少差异化资产特色，反馈节奏可能偏慢");
+  }
+  return hints;
+}
+
+function getManagerPeerInsight(product) {
+  if (!product.manager) return null;
+  const sourceManagers = String(product.manager || "")
+    .split(/[、,，\/ ]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const sameManagerRows = state.data.products.filter((item) => {
+    if (item.product_id === product.product_id || !item.manager) return false;
+    const targetManagers = String(item.manager)
+      .split(/[、,，\/ ]+/)
+      .map((name) => name.trim())
+      .filter(Boolean);
+    return sourceManagers.some((name) => targetManagers.includes(name));
+  });
+  const peerManagers = state.data.products.filter(
+    (item) =>
+      item.product_id !== product.product_id &&
+      item.manager &&
+      item.fund_company !== product.fund_company &&
+      getProductSegmentKey(item) === getProductSegmentKey(product)
+  );
+  return {
+    sameManagerCount: sameManagerRows.length,
+    peerManagerCount: peerManagers.length,
+    peerManagers: [...new Set(peerManagers.map((item) => item.manager))].slice(0, 3),
   };
 }
 
@@ -348,6 +554,11 @@ function getSimilarityScore(source, target) {
   const sourceTags = new Set(sourceProfile.tags);
   targetProfile.tags.forEach((tag) => {
     if (sourceTags.has(tag)) score += 1;
+  });
+  const sourceThemes = new Set(source.asset_theme_tags || sourceProfile.tags.filter((tag) => ["海外资产", "黄金商品", "REITs"].includes(tag)));
+  const targetThemes = target.asset_theme_tags || targetProfile.tags.filter((tag) => ["海外资产", "黄金商品", "REITs"].includes(tag));
+  targetThemes.forEach((tag) => {
+    if (sourceThemes.has(tag)) score += 3;
   });
   return score;
 }
@@ -427,6 +638,9 @@ function getSignalPriority(product) {
   if (badge.tone === "danger") score += 28;
   if (product.current_stage === "新申报") score += 22;
   if (product.is_key_company) score += 12;
+  if (getMacroMatch(product)) score += 10;
+  if (product.batch_role === "第一梯队") score += 8;
+  if (product.theme_bucket) score += 6;
   score += Math.min(Number(product.days_in_stage) || 0, 30);
   if (product.latest_event_date) score += Number(String(product.latest_event_date).replace(/-/g, ""));
   return score;
@@ -461,10 +675,18 @@ function getStageEventDate(product, stage) {
   return null;
 }
 
-function buildStepTrackerMarkup(product, compact = false) {
+function buildStepTrackerMarkup(product, mode = false) {
   const currentIndex = stageIndex(product.current_stage);
+  const isMicro = mode === "micro" || mode === "micro-line";
+  const isCompact = mode === true || mode === "compact";
+  let variantClass = "";
+  if (mode === "micro-line") variantClass = "is-micro-line";
+  else if (isMicro) variantClass = "is-micro-line";
+  else if (isCompact) variantClass = "is-compact";
+  const donePct = currentIndex <= 0 ? 0 : (Math.min(currentIndex, STAGE_FLOW.length - 1) / (STAGE_FLOW.length - 1)) * 100;
+  const style = variantClass === "is-micro-line" ? ` style="--done-pct:${donePct.toFixed(1)}%"` : "";
   return `
-    <div class="step-track ${compact ? "is-compact" : ""}">
+    <div class="step-track ${variantClass}"${style}>
       ${STAGE_FLOW.map((stage, index) => {
         const status = index < currentIndex ? "is-done" : index === currentIndex ? "is-current" : "is-upcoming";
         const date = getStageEventDate(product, stage);
@@ -473,7 +695,7 @@ function buildStepTrackerMarkup(product, compact = false) {
             <div class="step-dot">${index < currentIndex ? "✓" : index + 1}</div>
             <div class="step-copy">
               <div class="step-name">${escapeHtml(shortStageLabel(stage))}</div>
-              ${compact ? "" : `<div class="step-date">${fmtDate(date)}</div>`}
+              ${isCompact || isMicro ? "" : `<div class="step-date">${fmtDate(date)}</div>`}
             </div>
           </div>
         `;
@@ -557,6 +779,9 @@ function getRadarScores(product) {
 
 function buildRadarSvg(product) {
   const scores = getRadarScores(product);
+  const benchmarkProduct =
+    product.fund_company === "华夏" ? (getPeerProducts(product, 1)[0] || null) : (getHuaxiaBenchmarks(product, 1)[0] || null);
+  const benchmarkScores = benchmarkProduct ? getRadarScores(benchmarkProduct) : null;
   const size = 260;
   const center = size / 2;
   const radius = 86;
@@ -570,6 +795,9 @@ function buildRadarSvg(product) {
   const polygon = scores
     .map((item, index) => pointAt(item.value, index).join(","))
     .join(" ");
+  const benchmarkPolygon = benchmarkScores
+    ? benchmarkScores.map((item, index) => pointAt(item.value, index).join(",")).join(" ")
+    : "";
   let svg = `<svg viewBox="0 0 ${size} ${size}" role="img" aria-label="策略雷达图">`;
   for (let step = steps; step >= 1; step -= 1) {
     const factor = step / steps;
@@ -582,11 +810,26 @@ function buildRadarSvg(product) {
     svg += `<line x1="${center}" y1="${center}" x2="${lx}" y2="${ly}" stroke="rgba(24,33,47,0.12)" stroke-width="1" />`;
     svg += `<text x="${x}" y="${y}" text-anchor="middle" font-size="11" fill="#667085">${escapeHtml(item.label)}</text>`;
   });
+  if (benchmarkPolygon) {
+    svg += `<polygon points="${benchmarkPolygon}" fill="rgba(34,72,112,0.08)" stroke="#224870" stroke-width="2" stroke-dasharray="6 5" />`;
+  }
   svg += `<polygon points="${polygon}" fill="rgba(193,18,31,0.18)" stroke="#c1121f" stroke-width="2.4" />`;
+  if (benchmarkScores) {
+    benchmarkScores.forEach((item, index) => {
+      const [x, y] = pointAt(item.value, index);
+      svg += `<circle cx="${x}" cy="${y}" r="3.6" fill="#224870" stroke="#fffdfa" stroke-width="1.5" />`;
+    });
+  }
   scores.forEach((item, index) => {
     const [x, y] = pointAt(item.value, index);
     svg += `<circle cx="${x}" cy="${y}" r="4.5" fill="#c1121f" stroke="#fffdfa" stroke-width="2" />`;
   });
+  if (benchmarkProduct) {
+    svg += `<rect x="24" y="${size - 34}" width="12" height="12" rx="3" fill="rgba(193,18,31,0.18)" stroke="#c1121f" stroke-width="1.6" />`;
+    svg += `<text x="42" y="${size - 24}" font-size="11" fill="#4b5563">当前产品</text>`;
+    svg += `<rect x="118" y="${size - 34}" width="12" height="12" rx="3" fill="rgba(34,72,112,0.08)" stroke="#224870" stroke-width="1.6" />`;
+    svg += `<text x="136" y="${size - 24}" font-size="11" fill="#4b5563">${escapeHtml(product.fund_company === "华夏" ? "外部竞品" : "华夏对标")}</text>`;
+  }
   svg += `</svg>`;
   return svg;
 }
@@ -645,6 +888,11 @@ function activateTabs() {
   document.querySelectorAll(".panel").forEach((panel) => {
     panel.classList.toggle("is-active", panel.id === `panel-${state.activeTab}`);
   });
+  const heading = TAB_HEADINGS[state.activeTab];
+  const h = document.getElementById("topbar-heading");
+  const s = document.getElementById("topbar-subheading");
+  if (heading && h) h.textContent = heading.title;
+  if (heading && s) s.textContent = heading.sub || "";
 }
 
 function tableMarkup(columns, rows, clickable = false) {
@@ -704,35 +952,218 @@ function renderHero() {
 }
 
 function renderKPIs() {
-  const kpi = state.data.summary.market_kpis[state.topPeriod] || {};
   const titlePrefix = state.topPeriod === "week" ? "近一周" : "今年以来";
-  const inReviewCount = state.data.products.filter((item) => isInReviewProduct(item)).length;
-  const gapCount = (((state.data.summary.stage_sections[state.topPeriod] || {}).declare || []) || []).filter(
+  const range = getPeriodRange(state.topPeriod);
+  const sliced = getSlicedProducts();
+  const inDateRange = (product, dateField) => inRange(product[dateField], range.start, range.end);
+  const kpi = sliceIsActive()
+    ? {
+        declare_count: sliced.filter((p) => inDateRange(p, "declare_date")).length,
+        accept_count: sliced.filter((p) => inDateRange(p, "accept_date")).length,
+        approval_count: sliced.filter((p) => inDateRange(p, "approval_date")).length,
+        establish_count: sliced.filter((p) => inDateRange(p, "establish_date")).length,
+        raise_scale: sliced
+          .filter((p) => inDateRange(p, "establish_date"))
+          .reduce((sum, p) => sum + (Number(p.raise_scale) || 0), 0),
+      }
+    : state.data.summary.market_kpis[state.topPeriod] || {};
+  const inReviewCount = sliced.filter((item) => isInReviewProduct(item)).length;
+  const gapProducts = sliced.filter(
     (item) => item.fund_company !== "华夏" && getHuaxiaBenchmarkInsight(item).tone === "alert"
-  ).length;
+  );
+  const gapCount = gapProducts.length;
   const huaxiaYtd = (state.data.summary.company_rankings.all.ytd || []).find((item) => item.fund_company === "华夏") || {};
+  const weekly = (state.data.summary.trends && state.data.summary.trends.weekly_establish) || [];
+  const scaleDelta = computeWoWDelta(weekly.map((r) => Number(r.raise_scale) || 0));
+  const countDelta = computeWoWDelta(weekly.map((r) => Number(r.establish_count) || 0));
+  const sparkline = buildSparklineSvg(weekly.map((r) => Number(r.raise_scale) || 0));
+  const slicePrefix = sliceIsActive() ? "切片 · " : "";
   const items = [
-    { icon: "申", label: `${titlePrefix}新申报`, value: kpi.declare_count ?? 0, note: "按材料接收日统计" },
-    { icon: "受", label: `${titlePrefix}新受理`, value: kpi.accept_count ?? 0, note: "按材料受理日统计" },
-    { icon: "批", label: `${titlePrefix}新获批`, value: kpi.approval_count ?? 0, note: "按获批日期统计" },
-    { icon: "成", label: `${titlePrefix}新成立`, value: kpi.establish_count ?? 0, note: "按成立日统计" },
-    { icon: "募", label: `${titlePrefix}募集规模`, value: fmtNum(kpi.raise_scale), note: "单位：亿元" },
-    { icon: "盯", label: "华夏对标空白", value: gapCount, note: `当前在审 ${inReviewCount} 只 · 华夏已成立 ${huaxiaYtd.establish_count ?? 0} 只` },
+    { key: "declare", icon: "申", label: `${slicePrefix}${titlePrefix}新申报`, value: kpi.declare_count ?? 0, note: "按材料接收日 · 点击下钻" },
+    { key: "accept", icon: "受", label: `${slicePrefix}${titlePrefix}新受理`, value: kpi.accept_count ?? 0, note: "按材料受理日 · 点击下钻" },
+    { key: "approval", icon: "批", label: `${slicePrefix}${titlePrefix}新获批`, value: kpi.approval_count ?? 0, note: "按获批日期 · 点击下钻" },
+    { key: "establish", icon: "成", label: `${slicePrefix}${titlePrefix}新成立`, value: kpi.establish_count ?? 0, note: "按成立日 · 点击下钻", delta: sliceIsActive() ? null : countDelta },
+    {
+      key: "raise",
+      icon: "募",
+      label: `${slicePrefix}${titlePrefix}募集规模`,
+      value: fmtNum(kpi.raise_scale),
+      note: sliceIsActive() ? "单位：亿元 · 点击查看明细" : "亿元 · 近8周走势 · 点击下钻",
+      delta: sliceIsActive() ? null : scaleDelta,
+      spark: sliceIsActive() ? "" : sparkline,
+    },
+    {
+      key: "gap",
+      icon: "盯",
+      label: `${slicePrefix}华夏对标空白`,
+      value: gapCount,
+      note: `在审 ${inReviewCount} 只 · 华夏已成立 ${huaxiaYtd.establish_count ?? 0} 只 · 点击下钻`,
+      alert: gapCount > 0,
+    },
   ];
   document.getElementById("kpi-grid").innerHTML = items
-    .map(
-      (item) => `
-        <article class="kpi-card">
+    .map((item) => {
+      const deltaMarkup = item.delta
+        ? `<span class="kpi-delta ${item.delta.dir === "up" ? "is-up" : item.delta.dir === "down" ? "is-down" : ""}">
+              <span class="arrow">${item.delta.dir === "up" ? "▲" : item.delta.dir === "down" ? "▼" : "·"}</span>
+              <span>${escapeHtml(item.delta.label)}</span>
+            </span>`
+        : "";
+      const isActive = state.kpiDrill === item.key;
+      return `
+        <article class="kpi-card${item.alert ? " is-alert" : ""}${isActive ? " is-active" : ""}" data-kpi="${escapeHtml(item.key)}" tabindex="0" role="button" aria-pressed="${isActive ? "true" : "false"}">
+          ${item.alert ? `<span class="kpi-pulse" aria-hidden="true"></span>` : ""}
           <div class="kpi-topline">
             <div class="kpi-icon">${escapeHtml(item.icon)}</div>
             <div class="kpi-label">${escapeHtml(item.label)}</div>
           </div>
-          <div class="kpi-value">${escapeHtml(item.value)}</div>
+          <div class="kpi-value-wrap">
+            <div class="kpi-value">${escapeHtml(item.value)}</div>
+            ${deltaMarkup}
+          </div>
+          ${item.spark ? `<div class="kpi-sparkline-wrap">${item.spark}</div>` : ""}
           <div class="kpi-note">${escapeHtml(item.note)}</div>
         </article>
-      `
-    )
+      `;
+    })
     .join("");
+  document.querySelectorAll("#kpi-grid .kpi-card").forEach((card) => {
+    const handle = () => {
+      const key = card.dataset.kpi;
+      state.kpiDrill = state.kpiDrill === key ? null : key;
+      renderKPIs();
+      renderKpiDrill();
+    };
+    card.addEventListener("click", handle);
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handle();
+      }
+    });
+  });
+}
+
+function renderKpiDrill() {
+  const container = document.getElementById("kpi-drill");
+  if (!container) return;
+  const key = state.kpiDrill;
+  if (!key) {
+    container.innerHTML = "";
+    return;
+  }
+  const range = getPeriodRange(state.topPeriod);
+  const sliced = getSlicedProducts();
+  const periodLabel = state.topPeriod === "week" ? "近一周" : "今年以来";
+  const slicePrefix = sliceIsActive() ? `${GLOBAL_SLICES.find((s) => s.key === state.globalSlice)?.label || ""} 切片 · ` : "";
+  let title = "";
+  let rows = [];
+  let sortFn = null;
+  let extraRender = null;
+  if (key === "declare") {
+    title = `${slicePrefix}${periodLabel}新申报`;
+    rows = sliced.filter((p) => inRange(p.declare_date, range.start, range.end));
+    sortFn = (a, b) => String(b.declare_date || "").localeCompare(String(a.declare_date || ""));
+  } else if (key === "accept") {
+    title = `${slicePrefix}${periodLabel}新受理`;
+    rows = sliced.filter((p) => inRange(p.accept_date, range.start, range.end));
+    sortFn = (a, b) => String(b.accept_date || "").localeCompare(String(a.accept_date || ""));
+  } else if (key === "approval") {
+    title = `${slicePrefix}${periodLabel}新获批`;
+    rows = sliced.filter((p) => inRange(p.approval_date, range.start, range.end));
+    sortFn = (a, b) => String(b.approval_date || "").localeCompare(String(a.approval_date || ""));
+  } else if (key === "establish") {
+    title = `${slicePrefix}${periodLabel}新成立`;
+    rows = sliced.filter((p) => inRange(p.establish_date, range.start, range.end));
+    sortFn = (a, b) => String(b.establish_date || "").localeCompare(String(a.establish_date || ""));
+  } else if (key === "raise") {
+    title = `${slicePrefix}${periodLabel}募集规模 · 按规模降序`;
+    rows = sliced.filter((p) => inRange(p.establish_date, range.start, range.end));
+    sortFn = (a, b) => (Number(b.raise_scale) || 0) - (Number(a.raise_scale) || 0);
+    extraRender = (r) => `<span class="tag-chip">募 ${fmtNum(r.raise_scale)} 亿</span>`;
+  } else if (key === "gap") {
+    title = `${slicePrefix}华夏对标空白 · 竞品无华夏同类储备`;
+    rows = sliced.filter((p) => p.fund_company !== "华夏" && getHuaxiaBenchmarkInsight(p).tone === "alert");
+    sortFn = (a, b) => String(b.latest_event_date || "").localeCompare(String(a.latest_event_date || ""));
+  }
+  if (sortFn) rows = rows.slice().sort(sortFn);
+  const display = rows.slice(0, 24);
+  container.innerHTML = `
+    <section class="kpi-drill-panel">
+      <div class="kpi-drill-head">
+        <div>
+          <div class="kpi-drill-kicker">KPI 下钻</div>
+          <div class="kpi-drill-title">${escapeHtml(title)}</div>
+          <div class="kpi-drill-sub">${rows.length} 只${rows.length > display.length ? ` · 展示前 ${display.length} 只` : ""}</div>
+        </div>
+        <button type="button" class="kpi-drill-close" aria-label="关闭下钻">收起 ×</button>
+      </div>
+      ${
+        display.length
+          ? `<div class="kpi-drill-list">${display
+              .map(
+                (r) => `
+                  <div class="kpi-drill-item clickable-row" data-product-id="${escapeHtml(r.product_id)}">
+                    <div class="kpi-drill-name">${escapeHtml(r.fund_name)}</div>
+                    <div class="kpi-drill-tags">
+                      <span class="tag-chip is-company">${escapeHtml(r.fund_company)}</span>
+                      <span class="tag-chip is-stage">${escapeHtml(r.current_stage)}</span>
+                      <span class="tag-chip">${escapeHtml(r.fof_type || "—")}</span>
+                      <span class="tag-chip is-date">${fmtDate(r.latest_event_date)}</span>
+                      ${extraRender ? extraRender(r) : ""}
+                    </div>
+                  </div>
+                `
+              )
+              .join("")}</div>`
+          : `<div class="empty-box">当前条件下暂无命中产品。</div>`
+      }
+    </section>
+  `;
+  container.querySelector(".kpi-drill-close")?.addEventListener("click", () => {
+    state.kpiDrill = null;
+    renderKPIs();
+    renderKpiDrill();
+  });
+  bindClickableRows(container);
+}
+
+function computeWoWDelta(values) {
+  if (!Array.isArray(values) || values.length < 2) return null;
+  const curr = values[values.length - 1];
+  const prev = values[values.length - 2];
+  if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
+  const diff = curr - prev;
+  if (prev === 0 && curr === 0) return { dir: "flat", label: "持平" };
+  if (prev === 0) return { dir: curr > 0 ? "up" : "down", label: "新起步" };
+  const pct = (diff / prev) * 100;
+  const dir = diff > 0 ? "up" : diff < 0 ? "down" : "flat";
+  const magnitude = Math.abs(pct);
+  const label = magnitude >= 100 ? `${magnitude.toFixed(0)}%` : `${magnitude.toFixed(1)}%`;
+  return { dir, label };
+}
+
+function buildSparklineSvg(values) {
+  const nums = (values || []).filter((v) => Number.isFinite(v));
+  if (nums.length < 2) return "";
+  const w = 140;
+  const h = 26;
+  const pad = 2;
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  const span = max - min || 1;
+  const step = (w - pad * 2) / (nums.length - 1);
+  const toY = (v) => pad + (1 - (v - min) / span) * (h - pad * 2);
+  const points = nums.map((v, i) => [pad + i * step, toY(v)]);
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  const fill = `M ${points[0][0].toFixed(1)} ${h - pad} L ${points.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" L ")} L ${points[points.length - 1][0].toFixed(1)} ${h - pad} Z`;
+  const last = points[points.length - 1];
+  return `<svg class="kpi-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="近8周走势">
+    <line class="spark-base" x1="${pad}" y1="${h - pad}" x2="${w - pad}" y2="${h - pad}" />
+    <path class="spark-fill" d="${fill}" />
+    <path class="spark-line" d="${path}" />
+    <circle class="spark-dot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.4" />
+  </svg>`;
 }
 
 function renderWatchControls() {
@@ -804,22 +1235,130 @@ function renderWatchFeed() {
   bindClickableRows(container);
 }
 
+function buildForecastAxisMarkup(events) {
+  const valid = (events || []).filter((e) => e && e.predicted_date);
+  if (!valid.length) return "";
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = today.getTime();
+  const end = start + 30 * 86400000;
+  const dayMs = 86400000;
+  const toPct = (d) => {
+    const t = parseDate(d)?.getTime();
+    if (!t) return null;
+    const clamped = Math.max(start, Math.min(end, t));
+    return ((clamped - start) / (end - start)) * 100;
+  };
+  const ticks = [];
+  for (let i = 0; i <= 30; i += 5) {
+    const dt = new Date(start + i * dayMs);
+    const isMajor = i % 10 === 0;
+    const pct = (i / 30) * 100;
+    ticks.push({
+      pct,
+      major: isMajor,
+      label: isMajor ? `${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}` : "",
+    });
+  }
+  const tickMarkup = ticks
+    .map(
+      (t) => `
+        <span class="forecast-axis-tick${t.major ? " is-major" : ""}" style="left:${t.pct.toFixed(2)}%"></span>
+        ${t.label ? `<span class="forecast-axis-tick-label" style="left:${t.pct.toFixed(2)}%">${escapeHtml(t.label)}</span>` : ""}
+      `
+    )
+    .join("");
+  const lanes = [
+    { key: "华夏", label: "华夏 FOF", filter: (e) => e.fund_company === "华夏", huaxia: true },
+    { key: "养老FOF", label: "养老 FOF", filter: (e) => (findProduct(e.product_id)?.fof_type || e.fof_type) === "养老FOF" && e.fund_company !== "华夏" },
+    { key: "ETF-FOF", label: "ETF-FOF", filter: (e) => (findProduct(e.product_id)?.fof_type || e.fof_type) === "ETF-FOF" && e.fund_company !== "华夏" },
+    { key: "普通FOF", label: "普通 FOF", filter: (e) => (findProduct(e.product_id)?.fof_type || e.fof_type) === "普通FOF" && e.fund_company !== "华夏" },
+  ];
+  const laneMarkup = lanes
+    .map((lane) => {
+      const laneEvents = valid.filter(lane.filter);
+      const nodes = laneEvents
+        .map((e) => {
+          const pct = toPct(e.predicted_date);
+          if (pct == null) return "";
+          const conf = e.confidence === "high" ? "conf-high" : e.confidence === "medium" ? "conf-medium" : "conf-low";
+          const watched = isWatchedCompany(e.fund_company) ? " is-watched" : "";
+          const huaxiaClass = lane.huaxia ? " is-huaxia" : "";
+          const tooltip = `${e.fund_company} · ${e.fund_name}\n预计 ${fmtDate(e.predicted_date)} · ${e.predicted_stage_label}`;
+          return `<button type="button" class="gantt-node ${conf}${watched}${huaxiaClass} clickable-row" data-product-id="${escapeHtml(
+            e.product_id
+          )}" style="left:${pct.toFixed(2)}%" title="${escapeHtml(tooltip)}" aria-label="${escapeHtml(tooltip)}"></button>`;
+        })
+        .join("");
+      return `
+        <div class="gantt-lane ${lane.huaxia ? "is-huaxia" : ""}">
+          <div class="gantt-lane-label">
+            <span class="lane-name">${escapeHtml(lane.label)}</span>
+            <span class="lane-count">${laneEvents.length}</span>
+          </div>
+          <div class="gantt-lane-track">
+            <div class="gantt-lane-rail"></div>
+            ${nodes || '<span class="gantt-empty">—</span>'}
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    <div class="forecast-gantt">
+      <div class="forecast-gantt-head">
+        <div class="forecast-gantt-title">
+          <span class="kicker">Future 30d</span>
+          <strong>按类型泳道 · 华夏置顶</strong>
+        </div>
+        <div class="forecast-gantt-legend">
+          <span><span class="dot conf-high"></span>高置信</span>
+          <span><span class="dot conf-medium"></span>中置信</span>
+          <span><span class="dot conf-low"></span>低置信</span>
+          <span><span class="dot is-huaxia-dot"></span>华夏</span>
+        </div>
+      </div>
+      <div class="gantt-axis-row">
+        <div class="gantt-axis-spacer"></div>
+        <div class="gantt-axis-ticks">${tickMarkup}</div>
+      </div>
+      ${laneMarkup}
+      <div class="forecast-gantt-footer">共 ${valid.length} 个预测节点 · 仅展示未来 30 天</div>
+    </div>
+  `;
+}
+
 function renderForecastTimeline() {
   const container = document.getElementById("forecast-timeline");
   if (!container) return;
   const future = state.data.summary.future_timeline || {};
-  const events = future.events || [];
-  const overdue = future.overdue || [];
+  const allowedIds = sliceIsActive() ? new Set(getSlicedProducts().map((p) => p.product_id)) : null;
+  const events = (future.events || []).filter((e) => (allowedIds ? allowedIds.has(e.product_id) : true));
+  const overdue = (future.overdue || []).filter((e) => (allowedIds ? allowedIds.has(e.product_id) : true));
+  const approvalWindow = getApprovalWindowInsight();
   if (!events.length && !overdue.length) {
     container.innerHTML = `<div class="empty-box">当前样本不足，暂未形成未来 30 天的节点预测。</div>`;
     return;
   }
+  const axis = buildForecastAxisMarkup(events);
   container.innerHTML = `
     <div class="forecast-list">
+      ${axis}
+      ${
+        approvalWindow
+          ? `<div class="watch-summary">最近获批节奏平均约 ${fmtNum(approvalWindow.avgGap)} 天一批，最近一次为 ${fmtDate(
+              approvalWindow.lastDate
+            )}，下一批窗口可重点关注 ${fmtDate(approvalWindow.predictedDate)} 前后。${
+              approvalWindow.dueProducts.length ? `当前有 ${approvalWindow.dueProducts.length} 只产品的预计获批时间落在该窗口附近。` : ""
+            }</div>`
+          : ""
+      }
       ${events
         .map((item) => {
           const label = String(item.predicted_date || "—").slice(5);
           const watched = isWatchedCompany(item.fund_company);
+          const confLabel = item.confidence === "high" ? "高置信" : item.confidence === "medium" ? "中置信" : "低置信";
+          const confClass = item.confidence === "high" ? "is-high" : item.confidence === "medium" ? "is-medium" : "is-low";
           return `
             <div class="forecast-item clickable-row" data-product-id="${escapeHtml(item.product_id)}">
               <div class="forecast-date">
@@ -832,9 +1371,9 @@ function renderForecastTimeline() {
                   item.strategy_segment_label
                 )}</div>
                 <div class="forecast-badges">
+                  <span class="confidence-chip ${confClass}">${confLabel}</span>
                   <span class="info-chip">${escapeHtml(item.benchmark_source || "样本不足")}</span>
                   <span class="info-chip">估算 ${escapeHtml(item.benchmark_days)} 天</span>
-                  <span class="info-chip">${item.confidence === "high" ? "高置信" : item.confidence === "medium" ? "中置信" : "低置信"}</span>
                   ${watched ? `<span class="severity-chip watch">已订阅</span>` : ""}
                 </div>
               </div>
@@ -1104,6 +1643,52 @@ function renderRailNav() {
   });
 }
 
+function renderGlobalSlice() {
+  const container = document.getElementById("global-slice");
+  if (!container) return;
+  const totalAll = state.data.products.length;
+  const items = GLOBAL_SLICES.map((slice) => {
+    const originalSlice = state.globalSlice;
+    state.globalSlice = slice.key;
+    const count = state.data.products.filter(passesGlobalSlice).length;
+    state.globalSlice = originalSlice;
+    return { ...slice, count };
+  });
+  container.innerHTML = `
+    <div class="slice-list">
+      ${items
+        .map(
+          (item) => `
+            <button class="slice-btn ${state.globalSlice === item.key ? "is-active" : ""}" data-slice="${escapeHtml(item.key)}" type="button">
+              <span class="slice-label">${escapeHtml(item.label)}</span>
+              <span class="slice-count">${item.count}</span>
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+    <div class="slice-hint">${escapeHtml(
+      sliceIsActive()
+        ? `${items.find((i) => i.key === state.globalSlice).hint} · 当前切片 ${items.find((i) => i.key === state.globalSlice).count}/${totalAll} 只`
+        : "所有切片作用于 KPI · 预测轴 · 盯盘焦点 · 重点异动"
+    )}</div>
+  `;
+  container.querySelectorAll(".slice-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const next = btn.dataset.slice;
+      state.globalSlice = next === state.globalSlice ? "all" : next;
+      state.kpiDrill = null;
+      renderGlobalSlice();
+      renderKPIs();
+      renderKpiDrill();
+      renderForecastTimeline();
+      renderInReviewPool();
+      renderKeyProducts();
+      renderHero();
+    });
+  });
+}
+
 function populateMonitorFilters() {
   const companySelect = document.getElementById("monitor-company");
   const stageSelect = document.getElementById("monitor-stage");
@@ -1114,6 +1699,7 @@ function populateMonitorFilters() {
     .map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value || "全部公司")}</option>`)
     .join("");
   stageSelect.innerHTML = [
+    { value: "auto", label: "智能优先（推荐）" },
     { value: "新申报", label: "只看新申报" },
     { value: "新受理", label: "只看新受理" },
     { value: "已获批", label: "只看已获批" },
@@ -1137,39 +1723,51 @@ function populateMonitorFilters() {
 }
 
 function filterMonitorProducts() {
-  const rows = state.data.products.filter(isInReviewProduct).filter((item) => {
+  const baseRows = state.data.products.filter(isInReviewProduct).filter((item) => {
     if (state.monitorFilters.company && item.fund_company !== state.monitorFilters.company) return false;
-    if (state.monitorFilters.stage !== "all" && item.current_stage !== state.monitorFilters.stage) return false;
     if (state.monitorFilters.search) {
       const text = `${item.fund_name} ${item.fund_company} ${deriveStrategyTags(item).join(" ")}`.toLowerCase();
       if (!text.includes(state.monitorFilters.search.toLowerCase())) return false;
     }
     return true;
   });
+  const resolved = resolveMonitorStageSelection(baseRows);
+  const rows = resolved.rows.slice();
 
   const sorters = {
-    threat: (a, b) => getSignalPriority(b) - getSignalPriority(a),
+    threat: (a, b) => {
+      const macroDelta = Number(getMacroMatch(b)) - Number(getMacroMatch(a));
+      if (macroDelta !== 0) return macroDelta;
+      return getSignalPriority(b) - getSignalPriority(a);
+    },
     days_desc: (a, b) => (Number(b.days_in_stage) || 0) - (Number(a.days_in_stage) || 0),
     latest_desc: (a, b) => String(b.latest_event_date || "").localeCompare(String(a.latest_event_date || "")),
     company: (a, b) => String(a.fund_company || "").localeCompare(String(b.fund_company || ""), "zh-CN"),
   };
-  return rows.sort(sorters[state.monitorFilters.sort] || sorters.threat);
+  return {
+    rows: rows.sort(sorters[state.monitorFilters.sort] || sorters.threat),
+    resolvedStage: resolved,
+    baseCount: baseRows.length,
+  };
 }
 
 function renderSignalSummary() {
   const container = document.getElementById("signal-summary");
   if (!container) return;
-  const rows = filterMonitorProducts();
+  const monitor = filterMonitorProducts();
+  const rows = monitor.rows;
   const declareRows = ((state.data.summary.stage_sections[state.topPeriod] || {}).declare || []) || [];
   const gapCount = rows.filter((item) => item.fund_company !== "华夏" && getHuaxiaBenchmarkInsight(item).tone === "alert").length;
   const defendCount = rows.filter((item) => getThreatBadge(item).label === "重点防守").length;
   const huaxiaRows = rows.filter((item) => item.fund_company === "华夏").length;
+  const macroRows = rows.filter((item) => getMacroMatch(item)).length;
   container.innerHTML = [
-    { label: "当前命中", value: rows.length, note: "符合筛选条件的在审产品" },
+    { label: "当前命中", value: rows.length, note: `当前展示口径：${monitor.resolvedStage.label}` },
     { label: "本期新申报", value: declareRows.length, note: `${state.topPeriod === "week" ? "近一周" : "今年以来"}新进入池子的产品` },
     { label: "华夏空白", value: gapCount, note: "竞品已卡位但华夏暂无同类" },
     { label: "重点防守", value: defendCount, note: "重点公司或直接对标华夏的产品" },
-    { label: "华夏在途", value: huaxiaRows, note: "当前华夏自己在途储备" },
+    { label: "宏观命中", value: macroRows, note: "符合当前投资时钟阶段的产品" },
+    { label: "华夏在途", value: huaxiaRows, note: `筛选前在审总量 ${monitor.baseCount} 只` },
   ]
     .map(
       (item) => `
@@ -1186,7 +1784,8 @@ function renderSignalSummary() {
 function renderSignalRadar() {
   const container = document.getElementById("signal-radar");
   if (!container) return;
-  const rows = filterMonitorProducts();
+  const monitor = filterMonitorProducts();
+  const rows = monitor.rows;
   if (!rows.length) {
     container.innerHTML = `<div class="empty-box">当前筛选条件下没有命中的在审产品。</div>`;
     return;
@@ -1197,6 +1796,7 @@ function renderSignalRadar() {
         const profile = getProductProfile(product);
         const insight = getHuaxiaBenchmarkInsight(product);
         const badge = getThreatBadge(product);
+        const macroMatch = getMacroMatch(product);
         const dateLabel = product.current_stage === "新申报" ? "接收日" : product.current_stage === "新受理" ? "受理日" : "最新日";
         const keyDate =
           product.current_stage === "新申报"
@@ -1205,17 +1805,21 @@ function renderSignalRadar() {
               ? product.accept_date
               : product.latest_event_date;
         return `
-          <article class="signal-card clickable-row" data-product-id="${escapeHtml(product.product_id)}">
+          <article class="signal-card clickable-row ${macroMatch ? "is-macro" : ""}" data-product-id="${escapeHtml(product.product_id)}">
             <div class="signal-topline">
               <div class="signal-badges">
                 <span class="signal-badge ${badge.tone}">${escapeHtml(badge.label)}</span>
+                ${macroMatch ? `<span class="signal-badge watch">时钟高亮</span>` : ""}
                 ${isWatchedCompany(product.fund_company) ? `<span class="signal-badge focus">已订阅</span>` : ""}
                 ${product.is_key_company ? `<span class="signal-badge subtle">重点公司</span>` : ""}
+                ${product.batch_role ? `<span class="signal-badge subtle">${escapeHtml(product.batch_role)}</span>` : ""}
               </div>
               <div class="signal-chevron">&gt;</div>
             </div>
             <h3>${escapeHtml(product.fund_name)}</h3>
-            <div class="signal-meta">${escapeHtml(product.fund_company)} · ${escapeHtml(product.fof_type)} · 风格 ${escapeHtml(profile.riskBucket)}</div>
+            <div class="signal-meta">${escapeHtml(product.fund_company)} · ${escapeHtml(product.fof_type)} · 风格 ${escapeHtml(profile.riskBucket)}${
+              product.theme_bucket ? ` · ${escapeHtml(product.theme_bucket)}` : ""
+            }</div>
             <div class="signal-tags">
               ${profile.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")}
             </div>
@@ -1224,11 +1828,16 @@ function renderSignalRadar() {
               <div><span>${escapeHtml(dateLabel)}</span><strong>${fmtDate(keyDate)}</strong></div>
               <div><span>停留天数</span><strong>${escapeHtml(product.days_in_stage ?? "—")} 天</strong></div>
               <div><span>托管人</span><strong>${escapeHtml(product.custodian || "待披露")}</strong></div>
+              <div><span>同批次</span><strong>${escapeHtml(product.batch_peer_count != null ? `${product.batch_peer_count} 只` : "—")}</strong></div>
             </div>
             <div class="signal-insight ${insight.tone}">
               <div class="signal-insight-label">${escapeHtml(insight.label)}</div>
               <div class="signal-insight-title">${escapeHtml(insight.headline)}</div>
-              <div class="signal-insight-detail">${escapeHtml(insight.detail)}</div>
+              <div class="signal-insight-detail">${escapeHtml(
+                product.batch_role && product.batch_peer_count
+                  ? `${insight.detail} · ${product.batch_week_label || "本周"} ${product.batch_peer_count} 只同类处于同批次，当前为${product.batch_role}`
+                  : insight.detail
+              )}</div>
             </div>
           </article>
         `;
@@ -1606,7 +2215,11 @@ function renderKeyCompanyUpdates() {
 }
 
 function renderInReviewPool() {
-  const rows = state.data.products.filter(isInReviewProduct).sort((a, b) => getSignalPriority(b) - getSignalPriority(a)).slice(0, 6);
+  const rows = state.data.products
+    .filter(isInReviewProduct)
+    .filter(passesGlobalSlice)
+    .sort((a, b) => getSignalPriority(b) - getSignalPriority(a))
+    .slice(0, 8);
   const container = document.getElementById("in-review-pool");
   if (!rows.length) {
     container.innerHTML = `<div class="empty-box">当前没有在审产品。</div>`;
@@ -1615,18 +2228,35 @@ function renderInReviewPool() {
   container.innerHTML = `<div class="mini-list">${rows
     .map(
       (row) => `
-      <div class="mini-item clickable-row" data-product-id="${escapeHtml(row.product_id)}">
+      <div class="mini-item clickable-row" data-product-id="${escapeHtml(row.product_id)}" tabindex="0">
         <div class="mini-top">
           <div class="mini-name">${escapeHtml(row.fund_name)}</div>
           <span class="pill">${escapeHtml(isWatchedCompany(row.fund_company) ? `${getThreatBadge(row).label} · 已订阅` : getThreatBadge(row).label)}</span>
         </div>
-        <div class="mini-meta">${escapeHtml(row.fund_company)} · ${escapeHtml(row.current_stage)} · 已停留 ${escapeHtml(row.days_in_stage)} 天</div>
-        <div class="mini-step-wrap">${buildStepTrackerMarkup(row, true)}</div>
+        <div class="mini-meta">${escapeHtml(row.fund_company)} · ${escapeHtml(row.current_stage)} · 停留 ${escapeHtml(row.days_in_stage)}d</div>
+        <div class="mini-step-wrap">${buildStepTrackerMarkup(row, "micro")}</div>
+        <div class="mini-step-detail">${buildStepDetailRows(row)}</div>
       </div>
     `
     )
     .join("")}</div>`;
   bindClickableRows(container);
+}
+
+function buildStepDetailRows(product) {
+  const currentIndex = stageIndex(product.current_stage);
+  return STAGE_FLOW.map((stage, index) => {
+    const status = index < currentIndex ? "is-done" : index === currentIndex ? "is-current" : "";
+    const dateLabel = fmtDate(getStageEventDate(product, stage));
+    const hint =
+      index < currentIndex ? "已完成" : index === currentIndex ? `停留 ${product.days_in_stage ?? "—"}d` : "待推进";
+    return `
+      <div class="mini-step-row ${status}">
+        <strong>${escapeHtml(shortStageLabel(stage))}</strong>
+        <span>${escapeHtml(dateLabel === "—" ? hint : `${dateLabel} · ${hint}`)}</span>
+      </div>
+    `;
+  }).join("");
 }
 
 function renderTrendChart() {
@@ -1703,31 +2333,323 @@ function renderTrendChart() {
   document.getElementById("trend-chart").innerHTML = `<div class="svg-wrap">${svg}</div>`;
 }
 
+function getCompetitorSeverity(row) {
+  if (row.fund_company === "华夏") return { tier: 0, rank: "normal", label: "华夏动作" };
+  const insight = getHuaxiaBenchmarkInsight(row);
+  if (insight.tone === "alert") return { tier: 3, rank: "critical", label: "华夏空白" };
+  if (insight.product) {
+    const gap = stageIndex(row.current_stage) - stageIndex(insight.product.current_stage);
+    if (gap >= 2) return { tier: 3, rank: "critical", label: `竞品领先 ${gap} 步` };
+    if (gap === 1) return { tier: 2, rank: "warning", label: "竞品领先 1 步" };
+    if (gap === 0) return { tier: 1, rank: "muted", label: "同步推进" };
+    if (gap < 0) return { tier: 0, rank: "normal", label: `华夏领先 ${-gap} 步` };
+  }
+  return { tier: 1, rank: "normal", label: insight.label || "跟踪中" };
+}
+
 function renderKeyProducts() {
   const container = document.getElementById("key-products");
   if (!container) return;
-  const rows = getProductsForTopPeriod()
-    .sort((a, b) => getSignalPriority(b) - getSignalPriority(a))
-    .slice(0, 10);
-  container.innerHTML = rows.length
-    ? `<div class="key-product-list">${rows
-        .map(
-          (row) => `
-            <div class="key-product-item clickable-row" data-product-id="${escapeHtml(row.product_id)}">
-              <div class="item-top">
-                <div class="item-name">${escapeHtml(row.fund_name)}</div>
-                <span class="pill">${escapeHtml(isWatchedCompany(row.fund_company) ? `${getThreatBadge(row).label} · 已订阅` : getThreatBadge(row).label)}</span>
-              </div>
-              <div class="item-meta">${escapeHtml(row.fund_company)} · ${escapeHtml(row.current_stage)} · 最新日期 ${fmtDate(
-                row.latest_event_date
-              )}</div>
-              <div class="item-insight">${escapeHtml(getHuaxiaBenchmarkInsight(row).headline)}</div>
-            </div>
-          `
-        )
-        .join("")}</div>`
-    : `<div class="empty-box">暂无重点产品。</div>`;
+  const sliceActive = sliceIsActive();
+  const competitorPool = (sliceActive ? getSlicedProducts() : getProductsForTopPeriod())
+    .filter((item) => item.fund_company !== "华夏");
+  const competitors = competitorPool
+    .sort((a, b) => {
+      const sa = getCompetitorSeverity(a).tier;
+      const sb = getCompetitorSeverity(b).tier;
+      if (sa !== sb) return sb - sa;
+      return getSignalPriority(b) - getSignalPriority(a);
+    })
+    .slice(0, 12);
+  const huaxiaAll = state.data.products
+    .filter((item) => item.fund_company === "华夏")
+    .filter((item) => (sliceActive ? passesGlobalSlice(item) : true))
+    .sort((a, b) => {
+      const aIn = isInReviewProduct(a) ? 1 : 0;
+      const bIn = isInReviewProduct(b) ? 1 : 0;
+      if (aIn !== bIn) return bIn - aIn;
+      return String(b.latest_event_date || "").localeCompare(String(a.latest_event_date || ""));
+    });
+  const criticalCount = competitorPool.filter((p) => getCompetitorSeverity(p).rank === "critical").length;
+  const warnCount = competitorPool.filter((p) => getCompetitorSeverity(p).rank === "warning").length;
+  const parts = [];
+  parts.push(`
+    <div class="key-products-toolbar">
+      <div class="severity-summary">
+        <span class="sev-dot crit"></span>
+        <span>红灯 <strong>${criticalCount}</strong></span>
+        <span class="sev-sep">·</span>
+        <span class="sev-dot warn"></span>
+        <span>黄灯 <strong>${warnCount}</strong></span>
+        <span class="sev-sep">·</span>
+        <span>总竞品 <strong>${competitorPool.length}</strong></span>
+      </div>
+      <div class="subtabs view-toggle" id="key-products-view">
+        <button class="subtab ${state.keyProductsView === "list" ? "is-active" : ""}" data-view="list" type="button">列表</button>
+        <button class="subtab ${state.keyProductsView === "matrix" ? "is-active" : ""}" data-view="matrix" type="button">对标矩阵</button>
+      </div>
+    </div>
+  `);
+  if (state.keyProductsView === "matrix") {
+    parts.push(buildCoverageMatrixMarkup());
+    container.innerHTML = parts.join("");
+    bindClickableRows(container);
+    container.querySelectorAll("#key-products-view [data-view]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.keyProductsView = btn.dataset.view;
+        renderKeyProducts();
+      });
+    });
+    return;
+  }
+  parts.push(`
+    <div class="key-product-group">
+      <div class="key-product-group-head">
+        <span class="key-product-group-title">竞品异动</span>
+        <span class="key-product-group-count">${competitors.length} 只</span>
+      </div>
+      ${
+        competitors.length
+          ? `<div class="key-product-list">${competitors.map((row) => buildKeyProductCardMarkup(row)).join("")}</div>`
+          : `<div class="empty-box">当期暂无竞品异动。</div>`
+      }
+    </div>
+  `);
+  parts.push(`
+    <div class="key-product-group is-huaxia">
+      <div class="key-product-group-head">
+        <span class="key-product-group-title">华夏全量 FOF</span>
+        <span class="key-product-group-count">${huaxiaAll.length} 只</span>
+      </div>
+      ${
+        huaxiaAll.length
+          ? `<div class="huaxia-compact-list">${huaxiaAll
+              .map(
+                (row) => `
+                  <div class="huaxia-compact-item clickable-row" data-product-id="${escapeHtml(row.product_id)}">
+                    <div class="hc-top">
+                      <div class="hc-name">${escapeHtml(row.fund_name)}</div>
+                      <span class="tag-chip is-stage">${escapeHtml(row.current_stage)}</span>
+                    </div>
+                    <div class="hc-meta">${escapeHtml(row.fof_type || "—")} · 最新 ${fmtDate(row.latest_event_date)}${
+                      row.raise_scale != null ? ` · 募集 ${fmtNum(row.raise_scale)} 亿元` : ""
+                    }</div>
+                  </div>
+                `
+              )
+              .join("")}</div>`
+          : `<div class="empty-box">暂无华夏 FOF 数据。</div>`
+      }
+    </div>
+  `);
+  container.innerHTML = parts.join("");
   bindClickableRows(container);
+  container.querySelectorAll("#key-products-view [data-view]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.keyProductsView = btn.dataset.view;
+      renderKeyProducts();
+    });
+  });
+}
+
+function buildCoverageMatrixMarkup() {
+  const pool = state.data.products.filter(passesGlobalSlice);
+  const { risk: riskBuckets, holding: holdingBuckets } = getMatrixBuckets();
+  const cellData = {};
+  riskBuckets.forEach((r) => {
+    holdingBuckets.forEach((h) => {
+      cellData[`${r}|${h}`] = { huaxia: [], peer: [], key: [] };
+    });
+  });
+  pool.forEach((p) => {
+    const profile = getProductProfile(p);
+    const r = riskBuckets.includes(profile.riskBucket) ? profile.riskBucket : "平衡";
+    const h = holdingBuckets.includes(profile.holdingBucket) ? profile.holdingBucket : "其他持有";
+    const entry = cellData[`${r}|${h}`];
+    if (p.fund_company === "华夏") entry.huaxia.push(p);
+    else {
+      entry.peer.push(p);
+      if (p.is_key_company) entry.key.push(p);
+    }
+  });
+  let maxPeer = 1;
+  Object.values(cellData).forEach((v) => {
+    if (v.peer.length > maxPeer) maxPeer = v.peer.length;
+  });
+  const rowsMarkup = riskBuckets
+    .map((r) => {
+      const cells = holdingBuckets
+        .map((h) => {
+          const entry = cellData[`${r}|${h}`];
+          const hx = entry.huaxia.length;
+          const peer = entry.peer.length;
+          const intensity = peer / maxPeer;
+          const isBlank = peer > 0 && hx === 0;
+          const isDominated = hx > 0 && peer === 0;
+          const isBalanced = hx > 0 && peer > 0;
+          const stateClass = isBlank ? "is-blank" : isDominated ? "is-lead" : isBalanced ? "is-balanced" : "is-void";
+          const hxBubble = hx > 0 ? `<span class="matrix-bubble hx" style="--size:${12 + Math.min(hx, 4) * 4}px">${hx}</span>` : "";
+          const peerBubble = peer > 0 ? `<span class="matrix-bubble peer" style="--size:${12 + Math.min(peer, 8) * 3}px">${peer}</span>` : "";
+          const sample = entry.peer
+            .slice(0, 3)
+            .map((p) => `${p.fund_company}·${p.fund_name}`)
+            .join("\n");
+          const tip = `${r} × ${h}\n华夏 ${hx} 只 · 竞品 ${peer} 只${entry.key.length ? ` · 重点公司 ${entry.key.length} 只` : ""}${sample ? `\n样例：\n${sample}` : ""}`;
+          return `
+            <div class="matrix-cell ${stateClass}" style="--peer-intensity:${intensity.toFixed(2)}" title="${escapeHtml(tip)}">
+              <div class="matrix-cell-bubbles">${hxBubble}${peerBubble}</div>
+              <div class="matrix-cell-tag">${isBlank ? "空白" : isDominated ? "独占" : isBalanced ? `H${hx}/P${peer}` : ""}</div>
+            </div>
+          `;
+        })
+        .join("");
+      return `
+        <div class="matrix-row">
+          <div class="matrix-row-label">${escapeHtml(r)}</div>
+          ${cells}
+        </div>
+      `;
+    })
+    .join("");
+  const headerMarkup = `
+    <div class="matrix-row matrix-header">
+      <div class="matrix-row-label"></div>
+      ${holdingBuckets.map((h) => `<div class="matrix-col-label">${escapeHtml(h)}</div>`).join("")}
+    </div>
+  `;
+  const blankCells = Object.values(cellData).filter((v) => v.peer.length > 0 && v.huaxia.length === 0).length;
+  const leadCells = Object.values(cellData).filter((v) => v.huaxia.length > 0 && v.peer.length === 0).length;
+  const balancedCells = Object.values(cellData).filter((v) => v.huaxia.length > 0 && v.peer.length > 0).length;
+  return `
+    <div class="coverage-matrix">
+      <div class="matrix-hint">
+        <span><span class="dot hx"></span>红=华夏</span>
+        <span><span class="dot peer"></span>灰=竞品</span>
+        <span style="margin-left:auto">
+          <span class="pill sev-pill-critical">空白 ${blankCells}</span>
+          <span class="pill sev-pill-muted">并存 ${balancedCells}</span>
+          <span class="pill" style="background:var(--green-soft);color:var(--green);border-color:rgba(4,115,77,0.18)">独占 ${leadCells}</span>
+        </span>
+      </div>
+      <div class="matrix-body">
+        ${headerMarkup}
+        ${rowsMarkup}
+      </div>
+      <div class="matrix-axis-hint">
+        <span class="axis-y">风险偏好 ↑</span>
+        <span class="axis-x">持有期 →</span>
+      </div>
+    </div>
+  `;
+}
+
+function buildKeyProductCardMarkup(row) {
+  const insight = getHuaxiaBenchmarkInsight(row);
+  const watched = isWatchedCompany(row.fund_company);
+  const severity = getCompetitorSeverity(row);
+  const pillLabel = watched ? `${severity.label} · 已订阅` : severity.label;
+  const tags = [
+    { cls: "is-company", text: row.fund_company },
+    { cls: "is-stage", text: row.current_stage },
+    row.batch_role ? { cls: "", text: row.batch_role } : null,
+    row.fof_type ? { cls: "", text: row.fof_type } : null,
+    row.is_key_company ? { cls: "is-key", text: "重点公司" } : null,
+    { cls: "is-date", text: `最新 ${fmtDate(row.latest_event_date)}` },
+  ].filter(Boolean);
+  const tagMarkup = tags
+    .map((t) => `<span class="tag-chip ${t.cls}">${escapeHtml(t.text)}</span>`)
+    .join("");
+  const dualTrack = row.fund_company === "华夏" ? "" : buildDualTrackMarkup(row, insight);
+  return `
+    <div class="key-product-item clickable-row sev-${severity.rank}" data-product-id="${escapeHtml(row.product_id)}">
+      ${severity.rank === "critical" ? `<span class="sev-flag" aria-hidden="true">●</span>` : ""}
+      <div class="item-top">
+        <div class="item-name">${escapeHtml(row.fund_name)}</div>
+        <span class="pill sev-pill-${severity.rank}">${escapeHtml(pillLabel)}</span>
+      </div>
+      <div class="item-tags">${tagMarkup}</div>
+      ${dualTrack}
+    </div>
+  `;
+}
+
+function buildDualTrackMarkup(competitor, insight) {
+  const huaxiaMatch = insight && insight.product ? insight.product : null;
+  const compIdx = stageIndex(competitor.current_stage);
+  const hxIdx = huaxiaMatch ? stageIndex(huaxiaMatch.current_stage) : -1;
+  const compRow = buildDualTrackRow({
+    klass: "is-competitor",
+    label: "竞品",
+    product: competitor,
+    currentIdx: compIdx,
+    color: "var(--red)",
+    halo: "rgba(180, 17, 29, 0.18)",
+    metaRight: competitor.current_stage,
+  });
+  let hxRow;
+  if (huaxiaMatch) {
+    hxRow = buildDualTrackRow({
+      klass: "is-huaxia",
+      label: "华夏对标",
+      product: huaxiaMatch,
+      currentIdx: hxIdx,
+      color: "var(--blue)",
+      halo: "rgba(30, 64, 175, 0.18)",
+      metaRight: huaxiaMatch.current_stage,
+    });
+  } else {
+    hxRow = `
+      <div class="dual-track-row is-huaxia">
+        <div class="dual-track-label">华夏</div>
+        <div class="dual-track-bar" style="--bar-pct:0%;--bar-color:var(--gold);--bar-halo:rgba(163,83,8,0.18)">
+          <div class="dual-track-dots">
+            ${STAGE_FLOW.map(() => `<span class="dual-track-dot"></span>`).join("")}
+          </div>
+        </div>
+        <div class="dual-track-meta" style="color:var(--gold)">尚无对标</div>
+      </div>
+    `;
+  }
+  let verdict;
+  if (!huaxiaMatch) {
+    verdict = `<strong>身位：</strong><span class="verdict-blank">华夏空白 · 赛道裸奔</span>`;
+  } else if (compIdx === hxIdx) {
+    verdict = `<strong>身位：</strong>同步推进至 ${escapeHtml(shortStageLabel(competitor.current_stage))}`;
+  } else if (compIdx > hxIdx) {
+    verdict = `<strong>身位：</strong><span class="verdict-behind">竞品领先 ${compIdx - hxIdx} 步</span> · 需要加速`;
+  } else {
+    verdict = `<strong>身位：</strong><span class="verdict-lead">华夏领先 ${hxIdx - compIdx} 步</span>`;
+  }
+  const hxMatchLabel = huaxiaMatch
+    ? `对标 ${escapeHtml(huaxiaMatch.fund_name)}`
+    : "未在华夏产品线找到对标";
+  return `
+    <div class="dual-track">
+      ${compRow}
+      ${hxRow}
+      <div class="dual-track-verdict">
+        <span>${verdict}</span>
+        <span>${escapeHtml(hxMatchLabel)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function buildDualTrackRow({ klass, label, product, currentIdx, color, halo, metaRight }) {
+  const dots = STAGE_FLOW.map((_, i) => {
+    const status = i < currentIdx ? "is-done" : i === currentIdx ? "is-current" : "";
+    return `<span class="dual-track-dot ${status}"></span>`;
+  }).join("");
+  const pct = currentIdx <= 0 ? 0 : (Math.min(currentIdx, STAGE_FLOW.length - 1) / (STAGE_FLOW.length - 1)) * 100;
+  return `
+    <div class="dual-track-row ${klass}">
+      <div class="dual-track-label">${escapeHtml(label)}</div>
+      <div class="dual-track-bar" style="--bar-pct:${pct.toFixed(1)}%;--bar-color:${color};--bar-halo:${halo}">
+        <div class="dual-track-dots">${dots}</div>
+      </div>
+      <div class="dual-track-meta">${escapeHtml(metaRight || "—")}</div>
+    </div>
+  `;
 }
 
 function populateTrackerFilters() {
@@ -1770,8 +2692,10 @@ function renderTrackerTable() {
     [
       { label: "基金名称", key: "fund_name" },
       { label: "基金公司", key: "fund_company" },
+      { label: "基金经理", render: (row) => escapeHtml(row.manager || "—") },
       { label: "FOF类型", key: "fof_type" },
       { label: "当前状态", key: "current_stage" },
+      { label: "批次位置", render: (row) => escapeHtml(row.batch_role || "—") },
       { label: "状态停留天数", render: (row) => escapeHtml(row.days_in_stage ?? "—") },
       { label: "材料接收日", render: (row) => fmtDate(row.declare_date) },
       { label: "材料受理日", render: (row) => fmtDate(row.accept_date) },
@@ -2371,6 +3295,7 @@ function renderHuaxiaChase() {
                         <p>${escapeHtml(item.current_stage)} · 已停留 ${escapeHtml(item.days_in_stage ?? "—")} 天 · 最新日期 ${fmtDate(
                           item.latest_event_date
                         )}</p>
+                        <p>${escapeHtml(getDelayReasonHints(item).join("；") || "当前未识别到明确归因，建议优先补渠道和批次反馈信息。")}</p>
                       </div>
                     `
                   )
@@ -2497,9 +3422,10 @@ function buildDiagnosisMarkup(product, mode = "page") {
   const threat = getThreatBadge(product);
   const regimes = getRegimeEstimates(product);
   const segment = getMarketSegmentSnapshot(product);
-  const holderGuess = getHolderStructureGuess(product);
   const forecast = getFuturePrediction(product);
   const softIntel = getSoftIntelSnapshot(product);
+  const managerInsight = getManagerPeerInsight(product);
+  const delayHints = getDelayReasonHints(product);
   const timelineRows = [
     { stage: "新申报", date: product.declare_date, note: "材料接收" },
     { stage: "新受理", date: product.accept_date, note: product.declare_to_accept_days != null ? `申报到受理 ${product.declare_to_accept_days} 天` : "进入监管受理流程" },
@@ -2527,7 +3453,11 @@ function buildDiagnosisMarkup(product, mode = "page") {
             <div><span>最新进展</span><strong>${fmtDate(product.latest_event_date)}</strong></div>
             <div><span>停留天数</span><strong>${escapeHtml(product.days_in_stage ?? "—")} 天</strong></div>
             <div><span>托管人</span><strong>${escapeHtml(product.custodian || "待披露")}</strong></div>
+            <div><span>基金经理</span><strong>${escapeHtml(product.manager || "待披露")}</strong></div>
             <div><span>募集规模</span><strong>${fmtNum(product.raise_scale)} 亿元</strong></div>
+            <div><span>同批次位置</span><strong>${escapeHtml(
+              product.batch_role && product.batch_peer_count ? `${product.batch_role} · ${product.batch_peer_count} 只` : "—"
+            )}</strong></div>
           </div>
         </div>
         <div class="detail-card detail-card-side">
@@ -2606,7 +3536,17 @@ function buildDiagnosisMarkup(product, mode = "page") {
               </div>
               <div class="strategy-point">
                 <span>持有人结构预判</span>
-                <strong>${escapeHtml(holderGuess.label)}。${escapeHtml(holderGuess.note)}</strong>
+                <strong>${escapeHtml(softIntel.holderView)}。${escapeHtml(softIntel.holderNote)}</strong>
+              </div>
+              <div class="strategy-point">
+                <span>经理 vs 经理</span>
+                <strong>${escapeHtml(
+                  managerInsight
+                    ? `${product.manager} 名下已有 ${managerInsight.sameManagerCount} 只历史样本；外部同赛道可比经理 ${managerInsight.peerManagerCount} 位${managerInsight.peerManagers.length ? `，包括 ${managerInsight.peerManagers.join("、")}` : ""}。`
+                    : product.manager
+                      ? "当前没有识别到更多同经理或跨公司可比经理样本。"
+                      : "当前未披露基金经理，后续补齐后可做经理对标。"
+                )}</strong>
               </div>
               <div class="strategy-point">
                 <span>变相对标样本</span>
@@ -2655,10 +3595,11 @@ function buildDiagnosisMarkup(product, mode = "page") {
             <p>先看拟发渠道、持有人结构和底层偏好，再看外部同类推进到哪里。</p>
           </div>
         </div>
-        <div class="strategy-copy" style="margin-bottom:14px;">
+          <div class="strategy-copy" style="margin-bottom:14px;">
           <div class="strategy-point">
             <span>拟发渠道</span>
             <strong>${escapeHtml(softIntel.launchChannels)}${softIntel.channelStatus !== "待补充" ? ` · ${escapeHtml(softIntel.channelStatus)}` : ""}</strong>
+            <div class="peer-meta">${escapeHtml(softIntel.predictedChannel || "当前未启用渠道预测")}</div>
           </div>
           <div class="strategy-point">
             <span>持有人结构预判</span>
@@ -2669,6 +3610,15 @@ function buildDiagnosisMarkup(product, mode = "page") {
             <span>底层选基偏好 / 底层池建议</span>
             <strong>${escapeHtml(softIntel.underlyingPreference)}</strong>
             <div class="peer-meta">${escapeHtml(softIntel.poolAction)}</div>
+          </div>
+          <div class="strategy-point">
+            <span>审核堵点归因</span>
+            <strong>${escapeHtml(delayHints.length ? delayHints.join("；") : "当前未识别到明显堵点归因。")}</strong>
+            <div class="peer-meta">${escapeHtml(
+              product.batch_role && product.batch_peer_count
+                ? `${product.batch_week_label || "本周"}有 ${product.batch_peer_count} 只同类产品处于同批次，当前为${product.batch_role}。`
+                : "当前未识别到显著同批次信号。"
+            )}</div>
           </div>
         </div>
         ${
@@ -2821,8 +3771,10 @@ function wireEvents() {
 function renderAll() {
   activateTabs();
   renderRailNav();
+  renderGlobalSlice();
   renderHero();
   renderKPIs();
+  renderKpiDrill();
   renderWatchControls();
   renderWatchFeed();
   renderForecastTimeline();

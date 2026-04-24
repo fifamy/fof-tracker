@@ -7,7 +7,7 @@ PID_FILE="$ROOT_DIR/.fof_tracker_server.pid"
 HTTP_LOG="${FOF_TRACKER_HTTP_LOG:-/tmp/fof_tracker_http.log}"
 
 pick_python() {
-  for bin in "$ROOT_DIR/.venv/bin/python" /Users/menyao/anaconda/bin/python3.6 /Users/menyao/anaconda/bin/python3 python3.11 python3.10 python3.9 python3.8 python3.7 python3.6 python3; do
+  for bin in "$ROOT_DIR/.venv/bin/python" python3.11 python3.10 python3.9 python3.8 python3.7 python3 /Users/menyao/anaconda/bin/python3 /Users/menyao/anaconda/bin/python3.6 python3.6; do
     if [ -x "$bin" ]; then
       if PYTHONIOENCODING=utf-8 "$bin" -c "import pandas" >/dev/null 2>&1; then
         echo "$bin"

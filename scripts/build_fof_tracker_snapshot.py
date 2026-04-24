@@ -146,6 +146,7 @@ def parse_args():
     parser.add_argument("--web-recent-days", type=int, default=62, help="网页补充数据抓取近多少天，默认62天")
     parser.add_argument("--web-page-size", type=int, default=200, help="网页补充数据单页大小，默认200")
     parser.add_argument("--disable-web-supplement", action="store_true", help="关闭网页补充数据")
+    parser.add_argument("--allow-historical-as-of", action="store_true", help="允许手动指定显著早于自动识别日期的历史截止日")
     parser.add_argument("--cleanup-old-excels", action="store_true", help="成功生成数据后，自动删除同类旧版本 Excel")
     return parser.parse_args()
 
@@ -309,7 +310,7 @@ def pick_as_of_date(config, datasets):
     return today
 
 
-def resolve_as_of_date(config, datasets, as_of_date_override=None):
+def resolve_as_of_date(config, datasets, as_of_date_override=None, allow_historical_as_of=False):
     auto_date = pick_as_of_date(config, datasets)
     raw_override = safe_text(as_of_date_override)
     if raw_override == "":
@@ -324,7 +325,33 @@ def resolve_as_of_date(config, datasets, as_of_date_override=None):
     if override_date > today:
         raise ValueError("--as-of-date 不能晚于今天（%s）" % format_date(today))
 
+    if (
+        not allow_historical_as_of
+        and pd.notnull(auto_date)
+        and (auto_date.normalize() - override_date).days >= 365
+    ):
+        raise ValueError(
+            "--as-of-date=%s 早于自动识别截止日 %s 超过一年，疑似输错年份。"
+            "若确需回看历史，请改用 --allow-historical-as-of。"
+            % (format_date(override_date), format_date(auto_date))
+        )
+
     return override_date, auto_date, "manual"
+
+
+def resolve_web_reference_date(config, as_of_date_override=None):
+    raw_override = safe_text(as_of_date_override)
+    if raw_override != "":
+        override_date = parse_date(raw_override)
+        if pd.isnull(override_date):
+            raise ValueError("无法解析 --as-of-date，请使用 YYYY-MM-DD 格式，例如 2026-04-24")
+        return min(override_date.normalize(), pd.Timestamp.today().normalize())
+
+    ref_date = parse_date(config.get("as_of_date"))
+    if pd.notnull(ref_date):
+        return min(ref_date.normalize(), pd.Timestamp.today().normalize())
+
+    return pd.Timestamp.today().normalize()
 
 
 def read_business_excel(path, header_row, sheet_name=None):
@@ -427,9 +454,7 @@ def load_csrc_web_supplement(config, args):
     if args.disable_web_supplement:
         return pd.DataFrame(), pd.DataFrame()
 
-    ref_date = parse_date(config.get("as_of_date"))
-    if pd.isnull(ref_date):
-        ref_date = pd.Timestamp.today().normalize()
+    ref_date = resolve_web_reference_date(config, args.as_of_date)
     cutoff = ref_date.normalize() - timedelta(days=max(int(args.web_recent_days), 1) - 1)
 
     keywords = ["FOF", "基金中基金"]
@@ -804,27 +829,48 @@ def extract_risk_bucket(name):
     return "平衡"
 
 
+def extract_asset_theme_tags(name):
+    text = safe_text(name)
+    tags = []
+    checks = [
+        ("海外资产", r"(海外|全球|QDII|港股|跨境|环球|纳斯达克|标普|日经|恒生科技)"),
+        ("黄金商品", r"(黄金|商品|原油|大宗商品|贵金属)"),
+        ("REITs", r"(REIT|REITS|不动产投资信托)"),
+    ]
+    for label, pattern in checks:
+        if re.search(pattern, text, flags=re.IGNORECASE) and label not in tags:
+            tags.append(label)
+    return tags
+
+
 def build_strategy_signature(fund_name, fof_type=""):
     name = safe_text(fund_name)
     fof_type_text = safe_text(fof_type) or "普通FOF"
     holding_bucket = extract_holding_bucket(name)
     risk_bucket = extract_risk_bucket(name)
     is_etf = bool(re.search(r"ETF-FOF|ETF FOF|ETFFOF", name, flags=re.IGNORECASE)) or fof_type_text == "ETF-FOF"
+    asset_theme_tags = extract_asset_theme_tags(name)
+    theme_bucket = asset_theme_tags[0] if asset_theme_tags else ""
     base_type = "ETF-FOF" if is_etf else fof_type_text
     tags = []
-    for tag in [base_type, risk_bucket, holding_bucket]:
+    for tag in [base_type, risk_bucket, holding_bucket, *asset_theme_tags]:
         if tag and tag not in tags and tag != "其他持有":
             tags.append(tag)
     if is_etf and "ETF-FOF" not in tags:
         tags.append("ETF-FOF")
+    segment_parts = [base_type, risk_bucket, holding_bucket]
+    if theme_bucket:
+        segment_parts.append(theme_bucket)
     return {
         "fof_type": fof_type_text,
         "display_type": base_type,
         "risk_bucket": risk_bucket,
         "holding_bucket": holding_bucket,
         "is_etf": is_etf,
-        "segment_key": "%s|%s|%s|%s" % (base_type, risk_bucket, holding_bucket, "ETF" if is_etf else "STD"),
-        "segment_label": "%s · %s · %s" % (base_type, risk_bucket, holding_bucket),
+        "theme_bucket": theme_bucket or None,
+        "asset_theme_tags": asset_theme_tags,
+        "segment_key": "%s|%s|%s|%s|%s" % (base_type, risk_bucket, holding_bucket, theme_bucket or "BASE", "ETF" if is_etf else "STD"),
+        "segment_label": " · ".join(segment_parts),
         "tags": tags,
     }
 
@@ -866,6 +912,7 @@ def blank_record():
         "fund_name": None,
         "fund_company": None,
         "fof_type": None,
+        "manager": None,
         "is_key_company": False,
         "declare_date": pd.NaT,
         "accept_date": pd.NaT,
@@ -890,6 +937,10 @@ def blank_record():
         "intelligence_level": None,
         "intel_last_update": pd.NaT,
         "intel_note": None,
+        "batch_week_label": None,
+        "batch_peer_count": None,
+        "batch_role": None,
+        "batch_companies": None,
     }
 
 
@@ -918,6 +969,8 @@ def serialize_profile_record(row):
         "strategy_segment_key": profile["segment_key"],
         "strategy_segment_label": profile["segment_label"],
         "strategy_tags": profile["tags"],
+        "theme_bucket": profile["theme_bucket"],
+        "asset_theme_tags": profile["asset_theme_tags"],
     }
 
 
@@ -974,6 +1027,7 @@ def merge_records(config, declare_df, approval_df, issue_df, establish_df):
         rec["fund_name"] = choose_text(rec["fund_name"], row["fund_name"])
         rec["fund_company"] = choose_text(rec["fund_company"], row["fund_company"])
         rec["custodian"] = choose_text(rec["custodian"], row["custodian"])
+        rec["manager"] = choose_text(rec["manager"], row.get("manager"))
         rec["issue_start_date"] = choose_date(rec["issue_start_date"], row["issue_start_date"], "min")
         rec["fof_type"] = choose_text(rec["fof_type"], infer_fof_type("", row["fund_name"], config))
         rec["remarks"] = choose_text(rec["remarks"], safe_text(row.get("issue_status")))
@@ -983,6 +1037,7 @@ def merge_records(config, declare_df, approval_df, issue_df, establish_df):
         rec["fund_name"] = choose_text(rec["fund_name"], row["fund_name"])
         rec["fund_company"] = choose_text(rec["fund_company"], row["fund_company"])
         rec["custodian"] = choose_text(rec["custodian"], row["custodian"])
+        rec["manager"] = choose_text(rec["manager"], row.get("manager"))
         rec["issue_start_date"] = choose_date(rec["issue_start_date"], row["issue_start_date"], "min")
         rec["establish_date"] = choose_date(rec["establish_date"], row["establish_date"], "min")
         rec["fof_type"] = choose_text(rec["fof_type"], infer_fof_type("", row["fund_name"], config))
@@ -1080,6 +1135,69 @@ def apply_soft_intel(products, soft_intel_df):
                 record[col] = match.get(col)
         applied_rows.append(record)
     return pd.DataFrame(applied_rows)
+
+
+def apply_batch_signals(products):
+    df = products.copy()
+    if df.empty:
+        return df
+
+    df["batch_week_label"] = None
+    df["batch_peer_count"] = None
+    df["batch_role"] = None
+    df["batch_companies"] = None
+    df["batch_segment_key"] = df.apply(lambda row: build_strategy_signature(row.get("fund_name"), row.get("fof_type"))["segment_key"], axis=1)
+
+    batch_rows = []
+    for idx, row in df.iterrows():
+        stage_name = safe_text(row.get("current_stage"))
+        event_field = STAGE_FIELD_BY_NAME.get(stage_name)
+        event_date = parse_date(row.get(event_field)) if event_field else pd.NaT
+        if stage_name == "" or pd.isnull(event_date):
+            continue
+        week_start = (event_date - timedelta(days=int(event_date.dayofweek))).normalize()
+        week_end = week_start + timedelta(days=6)
+        batch_rows.append({
+            "index": idx,
+            "stage_name": stage_name,
+            "event_date": event_date,
+            "week_start": week_start,
+            "week_end": week_end,
+            "segment_key": row.get("batch_segment_key"),
+            "declare_date": parse_date(row.get("declare_date")),
+            "fund_company": safe_text(row.get("fund_company")),
+        })
+
+    if not batch_rows:
+        return df.drop(columns=["batch_segment_key"])
+
+    batch_df = pd.DataFrame(batch_rows)
+    for (_, _, _, _), group in batch_df.groupby(["stage_name", "week_start", "week_end", "segment_key"]):
+        group = group.sort_values(["event_date", "declare_date", "fund_company"], ascending=[True, True, True]).reset_index(drop=True)
+        peer_count = int(len(group))
+        if peer_count == 1:
+            role_map = {int(group.loc[0, "index"]): "单独推进"}
+        else:
+            earliest_date = group["event_date"].min()
+            role_map = {}
+            for _, batch_row in group.iterrows():
+                idx = int(batch_row["index"])
+                if batch_row["event_date"] == earliest_date:
+                    role_map[idx] = "第一梯队"
+                elif (batch_row["event_date"] - earliest_date).days <= 2:
+                    role_map[idx] = "同梯队"
+                else:
+                    role_map[idx] = "补报跟随"
+        companies = "、".join(sorted(group["fund_company"].dropna().astype(str).unique().tolist())[:6])
+        week_label = "%s~%s" % (format_date(group["week_start"].iloc[0]), format_date(group["week_end"].iloc[0]))
+        for idx in group["index"].tolist():
+            idx = int(idx)
+            df.at[idx, "batch_week_label"] = week_label
+            df.at[idx, "batch_peer_count"] = peer_count
+            df.at[idx, "batch_role"] = role_map.get(idx)
+            df.at[idx, "batch_companies"] = companies
+
+    return df.drop(columns=["batch_segment_key"])
 
 
 def limit_to_tracking_universe(products, as_of_date):
@@ -1874,10 +1992,11 @@ def serialize_record(row):
         data[field] = format_date(data.get(field))
     data["latest_event_date"] = format_date(data.get("latest_event_date"))
     data["raise_scale"] = None if pd.isnull(data.get("raise_scale")) else round(float(data.get("raise_scale")), 2)
-    for key in ["days_in_stage", "declare_to_accept_days", "accept_to_approval_days", "approval_to_issue_days", "issue_to_establish_days"]:
+    for key in ["days_in_stage", "declare_to_accept_days", "accept_to_approval_days", "approval_to_issue_days", "issue_to_establish_days", "batch_peer_count"]:
         data[key] = None if pd.isnull(data.get(key)) else int(data.get(key))
     data["remarks"] = safe_text(data.get("remarks")) or None
     data["custodian"] = safe_text(data.get("custodian")) or None
+    data["manager"] = safe_text(data.get("manager")) or None
     for field in [
         "launch_channels",
         "channel_status",
@@ -1886,6 +2005,9 @@ def serialize_record(row):
         "underlying_pool_action",
         "intelligence_level",
         "intel_note",
+        "batch_week_label",
+        "batch_role",
+        "batch_companies",
     ]:
         data[field] = safe_text(data.get(field)) or None
     profile = build_strategy_signature(data.get("fund_name"), data.get("fof_type"))
@@ -1894,6 +2016,8 @@ def serialize_record(row):
     data["strategy_segment_key"] = profile["segment_key"]
     data["strategy_segment_label"] = profile["segment_label"]
     data["strategy_tags"] = profile["tags"]
+    data["theme_bucket"] = profile["theme_bucket"]
+    data["asset_theme_tags"] = profile["asset_theme_tags"]
     return data
 
 
@@ -2182,6 +2306,7 @@ def load_products_from_real_excels(config, args):
         config,
         [declare_df, issue_df, establish_df, approval_df, web_declare_df, web_approval_df],
         args.as_of_date,
+        args.allow_historical_as_of,
     )
     merged = merge_records(config, declare_df, approval_df, issue_df, establish_df)
     products = finalize_products(merged, config, as_of_date)
@@ -2194,7 +2319,12 @@ def load_products_from_template(config, args):
     if not template_path.exists():
         raise FileNotFoundError("未找到真实 Excel，也未找到模板 CSV: %s" % template_path)
     products = load_template_data(template_path, config)
-    as_of_date, auto_as_of_date, as_of_source = resolve_as_of_date(config, [products], args.as_of_date)
+    as_of_date, auto_as_of_date, as_of_source = resolve_as_of_date(
+        config,
+        [products],
+        args.as_of_date,
+        args.allow_historical_as_of,
+    )
     products = finalize_products(products, config, as_of_date)
     products = limit_to_tracking_universe(products, as_of_date)
     return products, as_of_date, auto_as_of_date, as_of_source, {}
@@ -2209,6 +2339,7 @@ def main():
         products, as_of_date, auto_as_of_date, as_of_source, selected_files = load_products_from_template(config, args)
     soft_intel_df = load_soft_intel_data(args.soft_intel_file)
     products = apply_soft_intel(products, soft_intel_df)
+    products = apply_batch_signals(products)
     if soft_intel_df is not None and not soft_intel_df.empty:
         print("识别到软信息模板：%s（%s 条）" % (Path(args.soft_intel_file).name, len(soft_intel_df)))
     else:
