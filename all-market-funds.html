@@ -1,0 +1,1876 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>全市场基金发行跟踪</title>
+    <meta
+      name="description"
+      content="独立分析全市场基金的申报、受理、获批、募集、成立情况。"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --ink: #182033;
+        --muted: #687386;
+        --line: #dfe5ee;
+        --soft-line: #edf1f6;
+        --red: #b4232c;
+        --red-soft: #fff0f1;
+        --blue: #1f5fbf;
+        --blue-soft: #edf4ff;
+        --green: #117a56;
+        --green-soft: #ecf8f2;
+        --amber: #a15c08;
+        --amber-soft: #fff5e8;
+        --purple: #6e3bb8;
+        --shadow: 0 18px 46px rgba(32, 45, 72, 0.08);
+        --radius: 8px;
+        color-scheme: light;
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          "PingFang SC",
+          "Microsoft YaHei",
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(245, 247, 251, 0.7), rgba(245, 247, 251, 1)),
+          #f5f7fb;
+        color: var(--ink);
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+        gap: 18px;
+        min-height: 100vh;
+        padding: 18px;
+      }
+
+      .rail {
+        position: sticky;
+        top: 18px;
+        align-self: start;
+        display: grid;
+        gap: 12px;
+        max-height: calc(100vh - 36px);
+        overflow: auto;
+      }
+
+      .brand,
+      .rail-card,
+      .card,
+      .topbar {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+
+      .brand {
+        padding: 18px;
+      }
+
+      .eyebrow {
+        color: var(--red);
+        font-size: 12px;
+        font-weight: 750;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      .brand h1 {
+        margin-top: 8px;
+        font-size: 26px;
+        line-height: 1.15;
+        letter-spacing: 0;
+      }
+
+      .brand p {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .stamp {
+        display: grid;
+        gap: 7px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .stamp strong {
+        color: var(--ink);
+      }
+
+      .rail-card {
+        padding: 14px;
+      }
+
+      .rail-title {
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .file-list {
+        display: grid;
+        gap: 7px;
+        font-size: 12px;
+      }
+
+      .file-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px;
+        border-radius: 7px;
+        background: #f8fafc;
+        color: var(--muted);
+      }
+
+      .file-row strong {
+        color: var(--ink);
+      }
+
+      .file-row.is-ok strong {
+        color: var(--green);
+      }
+
+      .file-row.is-missing strong {
+        color: var(--red);
+      }
+
+      .upload-box {
+        display: grid;
+        gap: 8px;
+      }
+
+      .upload-box input {
+        width: 100%;
+        border: 1px dashed var(--line);
+        border-radius: 7px;
+        padding: 9px;
+        background: #fafcff;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 34px;
+        padding: 8px 11px;
+        border-radius: 7px;
+        background: var(--ink);
+        color: white;
+        font-weight: 750;
+        font-size: 13px;
+      }
+
+      .btn.secondary {
+        border: 1px solid var(--line);
+        background: white;
+        color: var(--ink);
+      }
+
+      .main {
+        display: grid;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 4;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 15px;
+      }
+
+      .topbar h2 {
+        font-size: 20px;
+      }
+
+      .topbar p {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .chip {
+        min-height: 34px;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 750;
+      }
+
+      .chip.is-active {
+        border-color: var(--red);
+        background: var(--red);
+        color: #fff;
+      }
+
+      .status {
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: #fff;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .status strong {
+        color: var(--ink);
+      }
+
+      .grid {
+        display: grid;
+        gap: 14px;
+      }
+
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(130px, 1fr));
+        gap: 12px;
+      }
+
+      .kpi {
+        min-height: 124px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .kpi span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .kpi strong {
+        display: block;
+        margin-top: 14px;
+        font-size: 28px;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .kpi p {
+        margin-top: 11px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .kpi.red {
+        background: linear-gradient(180deg, #fff, var(--red-soft));
+      }
+
+      .kpi.blue {
+        background: linear-gradient(180deg, #fff, var(--blue-soft));
+      }
+
+      .kpi.green {
+        background: linear-gradient(180deg, #fff, var(--green-soft));
+      }
+
+      .kpi.amber {
+        background: linear-gradient(180deg, #fff, var(--amber-soft));
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+        gap: 14px;
+      }
+
+      .card {
+        min-width: 0;
+        padding: 15px;
+      }
+
+      .section-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 13px;
+      }
+
+      .section-head h2 {
+        font-size: 17px;
+        line-height: 1.25;
+      }
+
+      .section-head p {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .pipeline {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(110px, 1fr));
+        gap: 9px;
+      }
+
+      .stage-card {
+        min-height: 116px;
+        border: 1px solid var(--soft-line);
+        border-radius: var(--radius);
+        padding: 11px;
+        background: #fbfcff;
+      }
+
+      .stage-card span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .stage-card strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 24px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .bar-track {
+        height: 7px;
+        margin-top: 12px;
+        overflow: hidden;
+        border-radius: 99px;
+        background: #eef2f7;
+      }
+
+      .bar-fill {
+        height: 100%;
+        min-width: 2px;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--blue), var(--green));
+      }
+
+      .bar-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .bar-row {
+        display: grid;
+        grid-template-columns: minmax(90px, 150px) minmax(0, 1fr) 74px;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .bar-row strong {
+        color: var(--ink);
+      }
+
+      .trend {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(54px, 1fr));
+        align-items: end;
+        gap: 9px;
+        height: 210px;
+        padding-top: 12px;
+      }
+
+      .trend-col {
+        display: grid;
+        align-items: end;
+        gap: 7px;
+        height: 100%;
+        min-width: 0;
+      }
+
+      .trend-bar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        min-height: 6px;
+        border-radius: 7px 7px 3px 3px;
+        background: linear-gradient(180deg, var(--red), var(--amber));
+        color: #fff;
+        font-size: 11px;
+        font-weight: 750;
+        padding-top: 5px;
+      }
+
+      .trend-label {
+        min-height: 30px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.25;
+        text-align: center;
+      }
+
+      .filters {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(120px, 1fr));
+        gap: 9px;
+        margin-bottom: 12px;
+      }
+
+      label {
+        display: grid;
+        gap: 5px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      input,
+      select {
+        min-width: 0;
+        width: 100%;
+        min-height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: white;
+        color: var(--ink);
+        padding: 8px 10px;
+        outline: 0;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: var(--blue);
+        box-shadow: 0 0 0 3px rgba(31, 95, 191, 0.12);
+      }
+
+      .table-wrap {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 980px;
+        background: white;
+        font-size: 12px;
+      }
+
+      th,
+      td {
+        padding: 10px 11px;
+        border-bottom: 1px solid var(--soft-line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #f8fafc;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 850;
+        white-space: nowrap;
+      }
+
+      td {
+        color: #344052;
+      }
+
+      .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .fund-name {
+        min-width: 240px;
+        color: var(--ink);
+        font-weight: 750;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 3px 7px;
+        border-radius: 99px;
+        background: #eef2f7;
+        color: #4a5668;
+        font-size: 11px;
+        font-weight: 750;
+        white-space: nowrap;
+      }
+
+      .pill.red {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .pill.blue {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .pill.green {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .pill.amber {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .mini-list {
+        display: grid;
+        gap: 9px;
+      }
+
+      .mini-row {
+        display: grid;
+        gap: 5px;
+        padding: 10px;
+        border: 1px solid var(--soft-line);
+        border-radius: 7px;
+        background: #fbfcff;
+      }
+
+      .mini-row strong {
+        font-size: 13px;
+      }
+
+      .mini-meta {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .empty {
+        padding: 18px;
+        border: 1px dashed var(--line);
+        border-radius: var(--radius);
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .row-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .small-note {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      @media (max-width: 1180px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .rail,
+        .topbar {
+          position: static;
+        }
+
+        .kpi-grid,
+        .pipeline {
+          grid-template-columns: repeat(3, minmax(150px, 1fr));
+        }
+
+        .content-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .shell {
+          padding: 10px;
+        }
+
+        .topbar {
+          display: grid;
+        }
+
+        .toolbar {
+          justify-content: flex-start;
+        }
+
+        .kpi-grid,
+        .pipeline,
+        .filters {
+          grid-template-columns: 1fr;
+        }
+
+        .trend {
+          overflow-x: auto;
+          grid-template-columns: repeat(8, 76px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="rail">
+        <section class="brand">
+          <div class="eyebrow">All Market Fund Tracker</div>
+          <h1>全市场基金发行跟踪</h1>
+          <p>独立页面，读取同目录业务 Excel，按申报、受理、获批、募集、成立五类节点观察全市场基金节奏。</p>
+          <div class="stamp" id="stamp"></div>
+        </section>
+
+        <section class="rail-card">
+          <div class="rail-title">数据源</div>
+          <div class="file-list" id="source-list"></div>
+        </section>
+
+        <section class="rail-card">
+          <div class="rail-title">手动载入</div>
+          <div class="upload-box">
+            <input id="file-input" type="file" accept=".xlsx,.xls" multiple />
+            <button class="btn secondary" id="reload-btn" type="button">重新读取同目录 Excel</button>
+            <div class="small-note">自动读取需通过本地网页服务访问；直接双击打开时可用这里选择 4 个业务 Excel。</div>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <section class="topbar">
+          <div>
+            <h2>发行与审批总览</h2>
+            <p id="topbar-subtitle">等待数据载入</p>
+          </div>
+          <div class="toolbar" id="period-toggle">
+            <button class="chip is-active" data-period="week" type="button">近一周</button>
+            <button class="chip" data-period="ytd" type="button">今年以来</button>
+            <button class="chip" data-period="all" type="button">全部</button>
+          </div>
+        </section>
+
+        <div class="status" id="status"><strong>正在载入：</strong>读取全市场基金业务 Excel。</div>
+
+        <section class="kpi-grid" id="kpi-grid"></section>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <h2>当前流程分布</h2>
+              <p>以每只基金当前最新阶段为准，包含待发行产品。</p>
+            </div>
+          </div>
+          <div class="pipeline" id="pipeline"></div>
+        </section>
+
+        <div class="content-grid">
+          <section class="card">
+            <div class="section-head">
+              <div>
+                <h2>基金类型结构</h2>
+                <p>按股票、债券、混合、指数、FOF、QDII 等口径归类。</p>
+              </div>
+            </div>
+            <div class="bar-list" id="type-bars"></div>
+          </section>
+
+          <section class="card">
+            <div class="section-head">
+              <div>
+                <h2>近 8 周成立趋势</h2>
+                <p>看成立数量和募集规模的短期节奏。</p>
+              </div>
+            </div>
+            <div class="trend" id="trend"></div>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <h2>公司竞争格局</h2>
+              <p>按当前时间范围内的申报、受理、获批、发行、成立动作汇总。</p>
+            </div>
+          </div>
+          <div class="table-wrap" id="company-ranking"></div>
+        </section>
+
+        <div class="content-grid">
+          <section class="card">
+            <div class="section-head">
+              <div>
+                <h2>阶段动态</h2>
+                <p>列出当前时间范围内各阶段最新动作。</p>
+              </div>
+            </div>
+            <div class="mini-list" id="stage-updates"></div>
+          </section>
+
+          <section class="card">
+            <div class="section-head">
+              <div>
+                <h2>待推进观察</h2>
+                <p>当前尚未成立的产品，按阶段和停留时间排序。</p>
+              </div>
+            </div>
+            <div class="mini-list" id="watch-list"></div>
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="section-head">
+            <div>
+              <h2>全市场基金明细</h2>
+              <p>支持按公司、类型、阶段和关键词筛选。</p>
+            </div>
+          </div>
+          <div class="filters">
+            <label>
+              <span>基金公司</span>
+              <select id="filter-company"></select>
+            </label>
+            <label>
+              <span>基金类型</span>
+              <select id="filter-type"></select>
+            </label>
+            <label>
+              <span>当前阶段</span>
+              <select id="filter-stage"></select>
+            </label>
+            <label>
+              <span>排序</span>
+              <select id="filter-sort">
+                <option value="latest">最新动作优先</option>
+                <option value="company">基金公司</option>
+                <option value="scale">募集规模</option>
+                <option value="stage_days">停留时间</option>
+              </select>
+            </label>
+            <label>
+              <span>关键词</span>
+              <input id="filter-search" type="search" placeholder="基金名称 / 公司 / 托管行" />
+            </label>
+          </div>
+          <div class="table-wrap" id="detail-table"></div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const STAGE_FLOW = ["新申报", "新受理", "已获批", "待发行", "发行中", "已成立", "已清盘"];
+      const FIELD_BY_STAGE = {
+        新申报: "declare_date",
+        新受理: "accept_date",
+        已获批: "approval_date",
+        待发行: "issue_start_date",
+        发行中: "issue_start_date",
+        已成立: "establish_date",
+        已清盘: "issue_end_date",
+      };
+      const FILE_CANDIDATES = {
+        declare: ["全行业新基金申报统计 (4).xlsx", "全行业新基金申报统计 (3).xlsx", "全行业新基金申报统计.xlsx"],
+        approval: ["基金获批情况统计（万得） (1).xlsx", "基金获批情况统计（万得）.xlsx", "基金获批情况统计.xlsx"],
+        issue: ["基金发行统计_募集 (1).xlsx", "基金发行统计_募集.xlsx"],
+        establish: ["基金发行统计_成立 (2).xlsx", "基金发行统计_成立 (1).xlsx", "基金发行统计_成立.xlsx"],
+      };
+      const FILE_LABELS = {
+        declare: "申报/受理",
+        approval: "获批",
+        issue: "募集",
+        establish: "成立",
+      };
+
+      const state = {
+        period: "week",
+        products: [],
+        sources: {},
+        asOfDate: null,
+        filters: {
+          company: "",
+          type: "",
+          stage: "",
+          sort: "latest",
+          search: "",
+        },
+      };
+
+      function $(id) {
+        return document.getElementById(id);
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function cleanText(value) {
+        if (value == null) return "";
+        return String(value).replace(/\s+/g, " ").trim();
+      }
+
+      function normalizeCompany(value) {
+        let text = cleanText(value).replace(/[（）]/g, (m) => (m === "（" ? "(" : ")")).replace(/\s/g, "");
+        ["基金管理有限公司", "基金管理股份有限公司", "基金管理有限责任公司", "基金管理", "基金"].some((suffix) => {
+          if (text.endsWith(suffix)) {
+            text = text.slice(0, -suffix.length);
+            return true;
+          }
+          return false;
+        });
+        return text || "未识别公司";
+      }
+
+      function normalizeFundName(value) {
+        return cleanText(value)
+          .replace(/[（）]/g, (m) => (m === "（" ? "(" : ")"))
+          .replace(/[－—–]/g, "-")
+          .replace(/\s/g, "")
+          .toUpperCase();
+      }
+
+      function parseDate(value) {
+        if (value == null || value === "") return null;
+        if (value instanceof Date && !Number.isNaN(value.getTime())) return stripTime(value);
+        if (typeof value === "number" && Number.isFinite(value)) {
+          const utcDays = Math.floor(value - 25569);
+          return stripTime(new Date(utcDays * 86400000));
+        }
+        const text = cleanText(value);
+        if (!text) return null;
+        const match = text.match(/(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+        if (!match) return null;
+        return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      }
+
+      function parseNumber(value) {
+        if (value == null || value === "") return null;
+        const num = Number(String(value).replace(/,/g, ""));
+        return Number.isFinite(num) ? num : null;
+      }
+
+      function stripTime(date) {
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      }
+
+      function formatDate(value) {
+        const date = value instanceof Date ? value : parseDate(value);
+        if (!date) return "-";
+        const yyyy = date.getFullYear();
+        const mm = String(date.getMonth() + 1).padStart(2, "0");
+        const dd = String(date.getDate()).padStart(2, "0");
+        return `${yyyy}-${mm}-${dd}`;
+      }
+
+      function shortDate(value) {
+        const date = value instanceof Date ? value : parseDate(value);
+        if (!date) return "-";
+        return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+      }
+
+      function daysBetween(start, end) {
+        const s = start instanceof Date ? start : parseDate(start);
+        const e = end instanceof Date ? end : parseDate(end);
+        if (!s || !e) return null;
+        return Math.round((e - s) / 86400000);
+      }
+
+      function fmtNum(value, digits = 0) {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return "-";
+        return num.toLocaleString("zh-CN", {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits,
+        });
+      }
+
+      function chooseDate(current, incoming, mode = "min") {
+        if (!incoming) return current || null;
+        if (!current) return incoming;
+        return mode === "max" ? (incoming > current ? incoming : current) : incoming < current ? incoming : current;
+      }
+
+      function chooseText(current, incoming) {
+        const next = cleanText(incoming);
+        return current || next || "";
+      }
+
+      function inferFundType(type1, type2, name) {
+        const text = `${cleanText(type1)} ${cleanText(type2)} ${cleanText(name)}`.toUpperCase();
+        if (/FOF|基金中基金|养老目标/.test(text)) return "FOF";
+        if (/REIT|不动产投资信托/.test(text)) return "REITs";
+        if (/QDII|海外|全球|港股|恒生|纳斯达克|标普/.test(text)) return "QDII";
+        if (/同业存单/.test(text)) return "同业存单";
+        if (/货币/.test(text)) return "货币型";
+        if (/债券|债/.test(text)) return "债券型";
+        if (/股票指数|指数型|ETF|联接基金|宽基指数|行业主题指数/.test(text)) return "股票指数型";
+        if (/股票/.test(text)) return "股票型";
+        if (/混合/.test(text)) return "混合型";
+        if (/商品|黄金|原油/.test(text)) return "商品型";
+        return cleanText(type1) || "其他";
+      }
+
+      function stageTone(stage) {
+        if (stage === "新申报") return "blue";
+        if (stage === "新受理") return "amber";
+        if (stage === "已获批") return "red";
+        if (stage === "待发行") return "amber";
+        if (stage === "发行中") return "blue";
+        if (stage === "已成立") return "green";
+        if (stage === "已清盘") return "";
+        return "";
+      }
+
+      function isInRange(value, range) {
+        const date = value instanceof Date ? value : parseDate(value);
+        if (!date) return false;
+        return (!range.start || date >= range.start) && (!range.end || date <= range.end);
+      }
+
+      function getRange() {
+        if (!state.asOfDate) return { start: null, end: null, label: "全部" };
+        if (state.period === "week") {
+          const start = new Date(state.asOfDate);
+          start.setDate(start.getDate() - 6);
+          return { start, end: state.asOfDate, label: `${shortDate(start)}-${shortDate(state.asOfDate)}` };
+        }
+        if (state.period === "ytd") {
+          const start = new Date(state.asOfDate.getFullYear(), 0, 1);
+          return { start, end: state.asOfDate, label: `${formatDate(start)}-${formatDate(state.asOfDate)}` };
+        }
+        return { start: null, end: null, label: "全部样本" };
+      }
+
+      function findHeaderRow(rows, required, preferred) {
+        if (rows[preferred] && required.every((key) => rows[preferred].map(cleanText).includes(key))) return preferred;
+        for (let i = 0; i < Math.min(rows.length, 14); i += 1) {
+          const header = rows[i].map(cleanText);
+          if (required.every((key) => header.includes(key))) return i;
+        }
+        return preferred;
+      }
+
+      function rowsToObjects(rows, headerIndex) {
+        const header = (rows[headerIndex] || []).map(cleanText);
+        return rows.slice(headerIndex + 1).map((row) => {
+          const obj = {};
+          header.forEach((name, index) => {
+            if (name) obj[name] = row[index] ?? "";
+          });
+          return obj;
+        });
+      }
+
+      function parseMetadataEndDate(rows) {
+        const dates = [];
+        rows.slice(0, 8).forEach((row) => {
+          row.forEach((cell, index) => {
+            if (cleanText(cell).includes("结束时间")) {
+              row.slice(index + 1, index + 5).forEach((candidate) => {
+                const date = parseDate(candidate);
+                if (date) dates.push(date);
+              });
+            }
+          });
+        });
+        return dates.sort((a, b) => b - a)[0] || null;
+      }
+
+      function getWorkbookRows(workbook, sheetName) {
+        if (workbook.__rowsBySheet) return workbook.__rowsBySheet[sheetName] || [];
+        return XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: true });
+      }
+
+      function parseWorkbook(type, workbook, fileName) {
+        const sheetName = workbook.SheetNames.find((name) => name.includes(FILE_LABELS[type])) || workbook.SheetNames[0];
+        const rows = getWorkbookRows(workbook, sheetName);
+        const metaEndDate = parseMetadataEndDate(rows);
+        const parsers = {
+          declare: parseDeclareRows,
+          approval: parseApprovalRows,
+          issue: parseIssueRows,
+          establish: parseEstablishRows,
+        };
+        return {
+          fileName,
+          sheetName,
+          metaEndDate,
+          rows: parsers[type](rows),
+        };
+      }
+
+      function parseDeclareRows(rows) {
+        const headerIndex = findHeaderRow(rows, ["基金管理人", "基金名称", "材料接收日"], 5);
+        return rowsToObjects(rows, headerIndex)
+          .map((row) => ({
+            source: "declare",
+            fund_name: cleanText(row["基金名称"]),
+            fund_company: normalizeCompany(row["基金管理人"]),
+            type1: cleanText(row["类型一"]),
+            type2: cleanText(row["类型二"]),
+            declare_date: parseDate(row["材料接收日"]),
+            accept_date: parseDate(row["材料受理日"]),
+            apply_item: cleanText(row["申请事项"]),
+            task_name: cleanText(row["任务名称"]),
+          }))
+          .filter((row) => row.fund_name);
+      }
+
+      function parseApprovalRows(rows) {
+        const headerIndex = findHeaderRow(rows, ["产品名称", "管理人", "决定日"], 2);
+        return rowsToObjects(rows, headerIndex)
+          .map((row) => ({
+            source: "approval",
+            fund_name: cleanText(row["产品名称"]),
+            fund_company: normalizeCompany(row["管理人"]),
+            declare_date: parseDate(row["材料接收日"]),
+            approval_date: parseDate(row["决定日"]),
+            remarks: cleanText(row["备注"]),
+          }))
+          .filter((row) => row.fund_name);
+      }
+
+      function parseIssueRows(rows) {
+        const headerIndex = findHeaderRow(rows, ["基金名称", "管理人", "募集起始日期"], 6);
+        return rowsToObjects(rows, headerIndex)
+          .map((row) => ({
+            source: "issue",
+            fund_name: cleanText(row["基金名称"]),
+            fund_company: normalizeCompany(row["管理人"]),
+            custodian: cleanText(row["托管行"]),
+            issue_status: cleanText(row["发行状态"]),
+            manager: cleanText(row["基金经理"]),
+            establish_date: parseDate(row["成立日"]),
+            issue_start_date: parseDate(row["募集起始日期"]),
+            issue_end_date: parseDate(row["募集结束日期"]),
+            raise_scale: parseNumber(row["总募集份额"]),
+            type1: cleanText(row["类型一"]),
+            type2: cleanText(row["类型二"]),
+            wind_id: cleanText(row["F_INFO_FUND_ID"]),
+          }))
+          .filter((row) => row.fund_name);
+      }
+
+      function parseEstablishRows(rows) {
+        const headerIndex = findHeaderRow(rows, ["基金名称", "管理人", "成立日期"], 6);
+        return rowsToObjects(rows, headerIndex)
+          .map((row) => ({
+            source: "establish",
+            fund_name: cleanText(row["基金名称"]),
+            fund_company: normalizeCompany(row["管理人"]),
+            custodian: cleanText(row["托管行"]),
+            issue_stage: cleanText(row["发行阶段"]),
+            manager: cleanText(row["基金经理"]),
+            establish_date: parseDate(row["成立日期"]),
+            issue_start_date: parseDate(row["募集开始日期"]),
+            issue_end_date: parseDate(row["募集截止日/计划募集截止日"]),
+            raise_scale: parseNumber(row["募集份额（AC合并）"]),
+            type1: cleanText(row["类型I"]),
+            type2: cleanText(row["类型II"]),
+          }))
+          .filter((row) => row.fund_name);
+      }
+
+      function blankProduct(row) {
+        return {
+          product_id: `FUND_${Math.abs(hashCode(`${row.fund_company}|${row.fund_name}`))}`,
+          fund_name: row.fund_name,
+          fund_company: row.fund_company,
+          type1: "",
+          type2: "",
+          fund_type: "其他",
+          manager: "",
+          custodian: "",
+          declare_date: null,
+          accept_date: null,
+          approval_date: null,
+          issue_start_date: null,
+          issue_end_date: null,
+          establish_date: null,
+          raise_scale: null,
+          issue_status: "",
+          issue_stage: "",
+          task_name: "",
+          remarks: "",
+          current_stage: null,
+          latest_event_date: null,
+          days_in_stage: null,
+        };
+      }
+
+      function hashCode(value) {
+        let hash = 0;
+        for (let i = 0; i < value.length; i += 1) {
+          hash = (hash << 5) - hash + value.charCodeAt(i);
+          hash |= 0;
+        }
+        return hash;
+      }
+
+      function mergeProducts(sourceGroups) {
+        const map = new Map();
+        Object.values(sourceGroups)
+          .flatMap((source) => source.rows || [])
+          .forEach((row) => {
+            const key = `${row.fund_company}|${normalizeFundName(row.fund_name)}`;
+            if (!map.has(key)) map.set(key, blankProduct(row));
+            const product = map.get(key);
+            product.fund_name = chooseText(product.fund_name, row.fund_name);
+            product.fund_company = chooseText(product.fund_company, row.fund_company);
+            product.type1 = chooseText(product.type1, row.type1);
+            product.type2 = chooseText(product.type2, row.type2);
+            product.manager = chooseText(product.manager, row.manager);
+            product.custodian = chooseText(product.custodian, row.custodian);
+            product.issue_status = chooseText(product.issue_status, row.issue_status);
+            product.issue_stage = chooseText(product.issue_stage, row.issue_stage);
+            product.task_name = chooseText(product.task_name, row.task_name);
+            product.remarks = chooseText(product.remarks, row.remarks);
+            product.declare_date = chooseDate(product.declare_date, row.declare_date, "min");
+            product.accept_date = chooseDate(product.accept_date, row.accept_date, "min");
+            product.approval_date = chooseDate(product.approval_date, row.approval_date, "min");
+            product.issue_start_date = chooseDate(product.issue_start_date, row.issue_start_date, "min");
+            product.issue_end_date = chooseDate(product.issue_end_date, row.issue_end_date, "max");
+            product.establish_date = chooseDate(product.establish_date, row.establish_date, "min");
+            if (Number.isFinite(row.raise_scale)) product.raise_scale = row.raise_scale;
+          });
+
+        const asOfDate = pickAsOfDate(sourceGroups, [...map.values()]);
+        state.asOfDate = asOfDate;
+        return [...map.values()]
+          .map((product) => finalizeProduct(product, asOfDate))
+          .filter((product) => product.current_stage)
+          .sort((a, b) => (b.latest_event_date || 0) - (a.latest_event_date || 0));
+      }
+
+      function pickAsOfDate(sourceGroups, products) {
+        const metaDates = Object.values(sourceGroups).map((source) => source.metaEndDate).filter(Boolean);
+        if (metaDates.length) return metaDates.sort((a, b) => b - a)[0];
+        const today = stripTime(new Date());
+        const dates = products
+          .flatMap((p) => [p.declare_date, p.accept_date, p.approval_date, p.establish_date, p.issue_end_date])
+          .filter(Boolean)
+          .filter((date) => date <= today);
+        return dates.sort((a, b) => b - a)[0] || today;
+      }
+
+      function finalizeProduct(product, asOfDate) {
+        product.fund_type = inferFundType(product.type1, product.type2, product.fund_name);
+        const statusText = `${product.issue_status} ${product.issue_stage}`;
+        if (/清盘/.test(statusText)) {
+          product.current_stage = "已清盘";
+          product.latest_event_date =
+            product.establish_date ||
+            product.issue_end_date ||
+            product.issue_start_date ||
+            product.approval_date ||
+            product.accept_date ||
+            product.declare_date;
+        } else if ((product.establish_date && product.establish_date <= asOfDate) || /已成立/.test(statusText)) {
+          product.current_stage = "已成立";
+          product.latest_event_date = product.establish_date || product.issue_end_date || product.issue_start_date;
+        } else if (/待发行/.test(statusText) || (product.issue_start_date && product.issue_start_date > asOfDate)) {
+          product.current_stage = "待发行";
+          product.latest_event_date = product.issue_start_date;
+        } else if (/发行中|待成立/.test(statusText) || product.issue_start_date) {
+          product.current_stage = "发行中";
+          product.latest_event_date = product.issue_start_date || product.approval_date;
+        } else if (product.approval_date) {
+          product.current_stage = "已获批";
+          product.latest_event_date = product.approval_date;
+        } else if (product.accept_date) {
+          product.current_stage = "新受理";
+          product.latest_event_date = product.accept_date;
+        } else if (product.declare_date) {
+          product.current_stage = "新申报";
+          product.latest_event_date = product.declare_date;
+        }
+        product.days_in_stage = product.latest_event_date ? daysBetween(product.latest_event_date, asOfDate) : null;
+        return product;
+      }
+
+      async function loadDefaultFiles() {
+        if (!canReadXlsx()) {
+          showStatus("当前浏览器缺少 XLSX 解析能力。请换用新版 Chrome/Edge，或确认在线解析库可访问后重试。", true);
+          return;
+        }
+        const sourceGroups = {};
+        const statusRows = {};
+        for (const [type, candidates] of Object.entries(FILE_CANDIDATES)) {
+          let loaded = null;
+          for (const fileName of candidates) {
+            try {
+              const response = await fetch(`${encodeURI(`./${fileName}`)}?v=${Date.now()}`, { cache: "no-store" });
+              if (!response.ok) continue;
+              const buffer = await response.arrayBuffer();
+              const workbook = await readWorkbook(buffer);
+              loaded = parseWorkbook(type, workbook, fileName);
+              break;
+            } catch (error) {
+              loaded = null;
+            }
+          }
+          if (loaded) {
+            sourceGroups[type] = loaded;
+            statusRows[type] = { ok: true, fileName: loaded.fileName, count: loaded.rows.length };
+          } else {
+            statusRows[type] = { ok: false, fileName: candidates[0], count: 0 };
+          }
+        }
+        state.sources = statusRows;
+        if (!Object.keys(sourceGroups).length) {
+          state.products = [];
+          renderAll();
+          showStatus("没有读取到同目录 Excel。若是直接双击打开 HTML，请用左侧手动载入选择业务 Excel。", true);
+          return;
+        }
+        state.products = mergeProducts(sourceGroups);
+        renderAll();
+        showStatus(`已读取 ${Object.keys(sourceGroups).length} 类数据，合并 ${state.products.length} 只基金。`);
+      }
+
+      async function loadUploadedFiles(files) {
+        if (!canReadXlsx()) {
+          showStatus("当前浏览器缺少 XLSX 解析能力。请换用新版 Chrome/Edge，或确认在线解析库可访问后重试。", true);
+          return;
+        }
+        const sourceGroups = {};
+        const statusRows = {};
+        const list = [...files];
+        for (const [type, candidates] of Object.entries(FILE_CANDIDATES)) {
+          const matched = list.find((file) => candidates.some((name) => file.name.includes(name.replace(/ \(\d+\)/, ""))) || matchFileType(type, file.name));
+          if (!matched) {
+            statusRows[type] = { ok: false, fileName: candidates[0], count: 0 };
+            continue;
+          }
+          const buffer = await matched.arrayBuffer();
+          const workbook = await readWorkbook(buffer);
+          const parsed = parseWorkbook(type, workbook, matched.name);
+          sourceGroups[type] = parsed;
+          statusRows[type] = { ok: true, fileName: matched.name, count: parsed.rows.length };
+        }
+        state.sources = statusRows;
+        state.products = mergeProducts(sourceGroups);
+        renderAll();
+        showStatus(`已从上传文件合并 ${state.products.length} 只基金。`);
+      }
+
+      function matchFileType(type, name) {
+        if (type === "declare") return name.includes("全行业新基金申报统计");
+        if (type === "approval") return name.includes("基金获批情况统计");
+        if (type === "issue") return name.includes("基金发行统计_募集");
+        if (type === "establish") return name.includes("基金发行统计_成立");
+        return false;
+      }
+
+      function canReadXlsx() {
+        return Boolean(window.XLSX || window.DecompressionStream);
+      }
+
+      async function readWorkbook(buffer) {
+        if (window.XLSX) return XLSX.read(buffer, { type: "array", cellDates: true });
+        return parseXlsxLite(buffer);
+      }
+
+      async function parseXlsxLite(buffer) {
+        const entries = await unzipXlsx(buffer);
+        const readXml = (path) => {
+          const text = entries[path];
+          if (!text) return null;
+          return new DOMParser().parseFromString(text, "application/xml");
+        };
+        const workbookXml = readXml("xl/workbook.xml");
+        const relsXml = readXml("xl/_rels/workbook.xml.rels");
+        if (!workbookXml || !relsXml) throw new Error("无法解析工作簿结构");
+
+        const relMap = {};
+        [...relsXml.getElementsByTagName("Relationship")].forEach((rel) => {
+          relMap[rel.getAttribute("Id")] = rel.getAttribute("Target");
+        });
+        const sharedStrings = parseSharedStrings(readXml("xl/sharedStrings.xml"));
+        const rowsBySheet = {};
+        const sheetNames = [...workbookXml.getElementsByTagName("sheet")].map((sheet) => {
+          const name = sheet.getAttribute("name");
+          const rid = sheet.getAttribute("r:id");
+          const target = relMap[rid] || "";
+          const path = target.startsWith("/") ? target.slice(1) : `xl/${target.replace(/^\.\.\//, "")}`;
+          const xml = readXml(path);
+          rowsBySheet[name] = xml ? parseSheetRows(xml, sharedStrings) : [];
+          return name;
+        });
+        return { SheetNames: sheetNames, __rowsBySheet: rowsBySheet };
+      }
+
+      function parseSharedStrings(xml) {
+        if (!xml) return [];
+        return [...xml.getElementsByTagName("si")].map((item) =>
+          [...item.getElementsByTagName("t")].map((node) => node.textContent || "").join("")
+        );
+      }
+
+      function parseSheetRows(xml, sharedStrings) {
+        const rows = [];
+        [...xml.getElementsByTagName("row")].forEach((rowNode) => {
+          const rowIndex = Number(rowNode.getAttribute("r") || rows.length + 1) - 1;
+          const row = rows[rowIndex] || [];
+          [...rowNode.getElementsByTagName("c")].forEach((cell) => {
+            const ref = cell.getAttribute("r") || "";
+            const colIndex = columnIndex(ref.replace(/\d+/g, ""));
+            const type = cell.getAttribute("t");
+            let value = "";
+            if (type === "inlineStr") {
+              value = [...cell.getElementsByTagName("t")].map((node) => node.textContent || "").join("");
+            } else {
+              value = cell.getElementsByTagName("v")[0]?.textContent ?? "";
+              if (type === "s") value = sharedStrings[Number(value)] ?? "";
+              else if (value !== "" && !Number.isNaN(Number(value))) value = Number(value);
+            }
+            row[colIndex] = value;
+          });
+          rows[rowIndex] = row;
+        });
+        return rows.map((row) => {
+          const last = row.length;
+          for (let i = 0; i < last; i += 1) {
+            if (row[i] == null) row[i] = "";
+          }
+          return row;
+        });
+      }
+
+      function columnIndex(col) {
+        let value = 0;
+        for (const char of col) value = value * 26 + (char.charCodeAt(0) - 64);
+        return Math.max(value - 1, 0);
+      }
+
+      async function unzipXlsx(buffer) {
+        const view = new DataView(buffer);
+        const bytes = new Uint8Array(buffer);
+        let eocd = -1;
+        for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 66000); i -= 1) {
+          if (view.getUint32(i, true) === 0x06054b50) {
+            eocd = i;
+            break;
+          }
+        }
+        if (eocd < 0) throw new Error("未识别到 XLSX 压缩目录");
+        const total = view.getUint16(eocd + 10, true);
+        let offset = view.getUint32(eocd + 16, true);
+        const entries = {};
+        for (let i = 0; i < total; i += 1) {
+          if (view.getUint32(offset, true) !== 0x02014b50) break;
+          const method = view.getUint16(offset + 10, true);
+          const compressedSize = view.getUint32(offset + 20, true);
+          const fileNameLength = view.getUint16(offset + 28, true);
+          const extraLength = view.getUint16(offset + 30, true);
+          const commentLength = view.getUint16(offset + 32, true);
+          const localOffset = view.getUint32(offset + 42, true);
+          const nameBytes = bytes.slice(offset + 46, offset + 46 + fileNameLength);
+          const name = new TextDecoder().decode(nameBytes);
+          const localNameLength = view.getUint16(localOffset + 26, true);
+          const localExtraLength = view.getUint16(localOffset + 28, true);
+          const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+          const compressed = bytes.slice(dataStart, dataStart + compressedSize);
+          if (name.endsWith(".xml") || name.endsWith(".rels")) {
+            const raw = method === 0 ? compressed : await inflateRaw(compressed);
+            entries[name] = new TextDecoder("utf-8").decode(raw);
+          }
+          offset += 46 + fileNameLength + extraLength + commentLength;
+        }
+        return entries;
+      }
+
+      async function inflateRaw(bytes) {
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+        return new Uint8Array(await new Response(stream).arrayBuffer());
+      }
+
+      function showStatus(message, alert = false) {
+        $("status").innerHTML = `<strong>${alert ? "提示：" : "状态："}</strong>${escapeHtml(message)}`;
+      }
+
+      function getPeriodProducts() {
+        const range = getRange();
+        if (state.period === "all") return state.products.slice();
+        return state.products.filter((product) =>
+          ["declare_date", "accept_date", "approval_date", "issue_start_date", "establish_date"].some((field) =>
+            isInRange(product[field], range)
+          )
+        );
+      }
+
+      function buildMetrics(products, range) {
+        const countByDate = (field) => products.filter((p) => state.period === "all" || isInRange(p[field], range)).length;
+        const established = products.filter((p) => state.period === "all" || isInRange(p.establish_date, range));
+        const scaleRows = established.filter((p) => Number.isFinite(Number(p.raise_scale)));
+        return {
+          declare: countByDate("declare_date"),
+          accept: countByDate("accept_date"),
+          approval: countByDate("approval_date"),
+          issue: countByDate("issue_start_date"),
+          establish: countByDate("establish_date"),
+          inReview: state.products.filter((p) => !["已成立", "已清盘"].includes(p.current_stage)).length,
+          raiseScale: scaleRows.reduce((sum, p) => sum + Number(p.raise_scale), 0),
+          scaleSample: scaleRows.length,
+        };
+      }
+
+      function groupCounts(rows, keyFn) {
+        const map = new Map();
+        rows.forEach((row) => {
+          const key = keyFn(row) || "未识别";
+          map.set(key, (map.get(key) || 0) + 1);
+        });
+        return [...map.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "zh-CN"));
+      }
+
+      function renderAll() {
+        renderStamp();
+        renderSources();
+        renderTopbar();
+        renderKpis();
+        renderPipeline();
+        renderTypeBars();
+        renderTrend();
+        renderCompanyRanking();
+        renderStageUpdates();
+        renderWatchList();
+        renderFilters();
+        renderDetailTable();
+      }
+
+      function renderStamp() {
+        $("stamp").innerHTML = state.asOfDate
+          ? `
+            <div>统计截止：<strong>${formatDate(state.asOfDate)}</strong></div>
+            <div>产品样本：<strong>${fmtNum(state.products.length)}</strong> 只</div>
+          `
+          : `<div>统计截止：<strong>未载入</strong></div>`;
+      }
+
+      function renderSources() {
+        $("source-list").innerHTML = Object.entries(FILE_LABELS)
+          .map(([type, label]) => {
+            const source = state.sources[type] || { ok: false, fileName: FILE_CANDIDATES[type][0], count: 0 };
+            return `
+              <div class="file-row ${source.ok ? "is-ok" : "is-missing"}">
+                <span>${escapeHtml(label)}</span>
+                <strong>${source.ok ? `${escapeHtml(source.count)} 条` : "未读取"}</strong>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      function renderTopbar() {
+        const range = getRange();
+        $("topbar-subtitle").textContent = state.products.length
+          ? `${range.label} · ${state.products.length} 只基金 · ${new Set(state.products.map((p) => p.fund_company)).size} 家基金公司`
+          : "等待数据载入";
+      }
+
+      function renderKpis() {
+        const range = getRange();
+        const products = getPeriodProducts();
+        const metrics = buildMetrics(products, range);
+        const cards = [
+          { label: "新申报", value: metrics.declare, note: "材料接收节点", tone: "blue" },
+          { label: "新受理", value: metrics.accept, note: "进入监管受理", tone: "amber" },
+          { label: "新获批", value: metrics.approval, note: "获得注册批复", tone: "red" },
+          { label: "发行/待发行", value: metrics.issue, note: "募集起始节点", tone: "blue" },
+          { label: "新成立", value: metrics.establish, note: "成立公告节点", tone: "green" },
+          { label: "募集规模", value: fmtNum(metrics.raiseScale, 1), note: `覆盖 ${metrics.scaleSample} 只成立产品`, tone: "amber" },
+        ];
+        $("kpi-grid").innerHTML = cards
+          .map(
+            (card) => `
+            <article class="kpi ${card.tone}">
+              <span>${escapeHtml(card.label)}</span>
+              <strong>${escapeHtml(card.value)}</strong>
+              <p>${escapeHtml(card.note)}</p>
+            </article>
+          `
+          )
+          .join("");
+      }
+
+      function renderPipeline() {
+        const counts = groupCounts(state.products, (p) => p.current_stage);
+        const max = Math.max(...counts.map((row) => row.count), 1);
+        $("pipeline").innerHTML = STAGE_FLOW.map((stage) => {
+          const count = counts.find((row) => row.label === stage)?.count || 0;
+          return `
+            <article class="stage-card">
+              <span>${escapeHtml(stage)}</span>
+              <strong>${fmtNum(count)}</strong>
+              <div class="bar-track"><div class="bar-fill" style="width:${(count / max) * 100}%"></div></div>
+            </article>
+          `;
+        }).join("");
+      }
+
+      function renderTypeBars() {
+        const rows = groupCounts(state.products, (p) => p.fund_type).slice(0, 12);
+        const max = Math.max(...rows.map((row) => row.count), 1);
+        $("type-bars").innerHTML = rows.length
+          ? rows
+              .map(
+                (row) => `
+                <div class="bar-row">
+                  <strong>${escapeHtml(row.label)}</strong>
+                  <div class="bar-track"><div class="bar-fill" style="width:${(row.count / max) * 100}%"></div></div>
+                  <span class="num">${fmtNum(row.count)} 只</span>
+                </div>
+              `
+              )
+              .join("")
+          : `<div class="empty">暂无类型数据</div>`;
+      }
+
+      function renderTrend() {
+        if (!state.asOfDate) {
+          $("trend").innerHTML = `<div class="empty">暂无趋势数据</div>`;
+          return;
+        }
+        const end = new Date(state.asOfDate);
+        const weeks = [];
+        for (let i = 7; i >= 0; i -= 1) {
+          const weekEnd = new Date(end);
+          weekEnd.setDate(end.getDate() - i * 7);
+          const weekStart = new Date(weekEnd);
+          weekStart.setDate(weekEnd.getDate() - 6);
+          const rows = state.products.filter((p) => isInRange(p.establish_date, { start: weekStart, end: weekEnd }));
+          weeks.push({
+            label: `${shortDate(weekStart)}\n${shortDate(weekEnd)}`,
+            count: rows.length,
+            scale: rows.reduce((sum, p) => sum + (Number.isFinite(Number(p.raise_scale)) ? Number(p.raise_scale) : 0), 0),
+          });
+        }
+        const max = Math.max(...weeks.map((row) => row.count), 1);
+        $("trend").innerHTML = weeks
+          .map(
+            (row) => `
+            <div class="trend-col">
+              <div class="trend-bar" style="height:${Math.max(6, (row.count / max) * 150)}px" title="募集规模 ${fmtNum(row.scale, 1)}">${row.count || ""}</div>
+              <div class="trend-label">${escapeHtml(row.label).replace("\n", "<br />")}</div>
+            </div>
+          `
+          )
+          .join("");
+      }
+
+      function companyRows() {
+        const range = getRange();
+        const map = new Map();
+        state.products.forEach((p) => {
+          const row =
+            map.get(p.fund_company) ||
+            {
+              fund_company: p.fund_company,
+              declare: 0,
+              accept: 0,
+              approval: 0,
+              issue: 0,
+              establish: 0,
+              inReview: 0,
+              raiseScale: 0,
+              products: 0,
+            };
+          row.products += 1;
+          if (!["已成立", "已清盘"].includes(p.current_stage)) row.inReview += 1;
+          if (state.period === "all" || isInRange(p.declare_date, range)) row.declare += p.declare_date ? 1 : 0;
+          if (state.period === "all" || isInRange(p.accept_date, range)) row.accept += p.accept_date ? 1 : 0;
+          if (state.period === "all" || isInRange(p.approval_date, range)) row.approval += p.approval_date ? 1 : 0;
+          if (state.period === "all" || isInRange(p.issue_start_date, range)) row.issue += p.issue_start_date ? 1 : 0;
+          if (state.period === "all" || isInRange(p.establish_date, range)) {
+            if (p.establish_date) {
+              row.establish += 1;
+              row.raiseScale += Number.isFinite(Number(p.raise_scale)) ? Number(p.raise_scale) : 0;
+            }
+          }
+          map.set(p.fund_company, row);
+        });
+        return [...map.values()]
+          .map((row) => ({ ...row, actionCount: row.declare + row.accept + row.approval + row.issue + row.establish }))
+          .sort((a, b) => b.actionCount - a.actionCount || b.establish - a.establish || a.fund_company.localeCompare(b.fund_company, "zh-CN"));
+      }
+
+      function renderCompanyRanking() {
+        const rows = companyRows().slice(0, 40);
+        $("company-ranking").innerHTML = rows.length
+          ? `
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>基金公司</th>
+                <th class="num">动作数</th>
+                <th class="num">申报</th>
+                <th class="num">受理</th>
+                <th class="num">获批</th>
+                <th class="num">发行</th>
+                <th class="num">成立</th>
+                <th class="num">在途</th>
+                <th class="num">募集规模</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row, index) => `
+                  <tr>
+                    <td>${index + 1}</td>
+                    <td><strong>${escapeHtml(row.fund_company)}</strong></td>
+                    <td class="num">${fmtNum(row.actionCount)}</td>
+                    <td class="num">${fmtNum(row.declare)}</td>
+                    <td class="num">${fmtNum(row.accept)}</td>
+                    <td class="num">${fmtNum(row.approval)}</td>
+                    <td class="num">${fmtNum(row.issue)}</td>
+                    <td class="num">${fmtNum(row.establish)}</td>
+                    <td class="num">${fmtNum(row.inReview)}</td>
+                    <td class="num">${fmtNum(row.raiseScale, 1)}</td>
+                  </tr>
+                `
+                )
+                .join("")}
+            </tbody>
+          </table>
+        `
+          : `<div class="empty">暂无公司排行数据</div>`;
+      }
+
+      function renderStageUpdates() {
+        const range = getRange();
+        const defs = [
+          ["新申报", "declare_date"],
+          ["新受理", "accept_date"],
+          ["已获批", "approval_date"],
+          ["发行/待发行", "issue_start_date"],
+          ["已成立", "establish_date"],
+        ];
+        const rows = defs.flatMap(([label, field]) =>
+          state.products
+            .filter((p) => state.period === "all" || isInRange(p[field], range))
+            .filter((p) => p[field])
+            .sort((a, b) => b[field] - a[field])
+            .slice(0, 5)
+            .map((p) => ({ label, field, product: p }))
+        );
+        $("stage-updates").innerHTML = rows.length
+          ? rows
+              .slice(0, 18)
+              .map(({ label, field, product }) => productMiniRow(product, label, product[field]))
+              .join("")
+          : `<div class="empty">当前时间范围内暂无阶段动作</div>`;
+      }
+
+      function renderWatchList() {
+        const rows = state.products
+          .filter((p) => !["已成立", "已清盘"].includes(p.current_stage))
+          .sort((a, b) => {
+            const aOverdue = a.current_stage === "待发行" ? -Math.abs(a.days_in_stage || 0) : a.days_in_stage || 0;
+            const bOverdue = b.current_stage === "待发行" ? -Math.abs(b.days_in_stage || 0) : b.days_in_stage || 0;
+            return bOverdue - aOverdue || (b.latest_event_date || 0) - (a.latest_event_date || 0);
+          })
+          .slice(0, 14);
+        $("watch-list").innerHTML = rows.length
+          ? rows
+              .map((p) => {
+                const note =
+                  p.current_stage === "待发行"
+                    ? `计划 ${formatDate(p.issue_start_date)} 启动募集`
+                    : `当前阶段停留 ${fmtNum(Math.max(p.days_in_stage || 0, 0))} 天`;
+                return productMiniRow(p, p.current_stage, p.latest_event_date, note);
+              })
+              .join("")
+          : `<div class="empty">暂无在途产品</div>`;
+      }
+
+      function productMiniRow(product, badge, date, note = "") {
+        return `
+          <article class="mini-row">
+            <div class="row-actions">
+              <span class="pill ${stageTone(product.current_stage)}">${escapeHtml(badge)}</span>
+              <span class="mini-meta">${formatDate(date)}</span>
+            </div>
+            <strong>${escapeHtml(product.fund_name)}</strong>
+            <div class="mini-meta">${escapeHtml(product.fund_company)} · ${escapeHtml(product.fund_type)} · 托管 ${escapeHtml(product.custodian || "-")}${note ? ` · ${escapeHtml(note)}` : ""}</div>
+          </article>
+        `;
+      }
+
+      function renderFilters() {
+        const company = $("filter-company");
+        const type = $("filter-type");
+        const stage = $("filter-stage");
+        const companyOptions = ["", ...new Set(state.products.map((p) => p.fund_company).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+        const typeOptions = ["", ...new Set(state.products.map((p) => p.fund_type).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+        const stageOptions = ["", ...STAGE_FLOW];
+        company.innerHTML = companyOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value || "全部")}</option>`).join("");
+        type.innerHTML = typeOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value || "全部")}</option>`).join("");
+        stage.innerHTML = stageOptions.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value || "全部")}</option>`).join("");
+        company.value = state.filters.company;
+        type.value = state.filters.type;
+        stage.value = state.filters.stage;
+        $("filter-sort").value = state.filters.sort;
+        $("filter-search").value = state.filters.search;
+      }
+
+      function filteredProducts() {
+        const keyword = state.filters.search.trim().toLowerCase();
+        const sorters = {
+          latest: (a, b) => (b.latest_event_date || 0) - (a.latest_event_date || 0),
+          company: (a, b) => a.fund_company.localeCompare(b.fund_company, "zh-CN") || (b.latest_event_date || 0) - (a.latest_event_date || 0),
+          scale: (a, b) => (Number(b.raise_scale) || 0) - (Number(a.raise_scale) || 0),
+          stage_days: (a, b) => (b.days_in_stage || 0) - (a.days_in_stage || 0),
+        };
+        return state.products
+          .filter((p) => !state.filters.company || p.fund_company === state.filters.company)
+          .filter((p) => !state.filters.type || p.fund_type === state.filters.type)
+          .filter((p) => !state.filters.stage || p.current_stage === state.filters.stage)
+          .filter((p) => {
+            if (!keyword) return true;
+            return `${p.fund_name} ${p.fund_company} ${p.custodian} ${p.manager} ${p.fund_type}`.toLowerCase().includes(keyword);
+          })
+          .sort(sorters[state.filters.sort] || sorters.latest);
+      }
+
+      function renderDetailTable() {
+        const rows = filteredProducts();
+        $("detail-table").innerHTML = rows.length
+          ? `
+          <table>
+            <thead>
+              <tr>
+                <th>基金名称</th>
+                <th>基金公司</th>
+                <th>类型</th>
+                <th>阶段</th>
+                <th>申报</th>
+                <th>受理</th>
+                <th>获批</th>
+                <th>募集起始</th>
+                <th>成立</th>
+                <th class="num">募集规模</th>
+                <th>托管行</th>
+                <th>基金经理</th>
+                <th class="num">停留天数</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .slice(0, 500)
+                .map(
+                  (row) => `
+                  <tr>
+                    <td class="fund-name">${escapeHtml(row.fund_name)}</td>
+                    <td>${escapeHtml(row.fund_company)}</td>
+                    <td>${escapeHtml(row.fund_type)}</td>
+                    <td><span class="pill ${stageTone(row.current_stage)}">${escapeHtml(row.current_stage)}</span></td>
+                    <td>${formatDate(row.declare_date)}</td>
+                    <td>${formatDate(row.accept_date)}</td>
+                    <td>${formatDate(row.approval_date)}</td>
+                    <td>${formatDate(row.issue_start_date)}</td>
+                    <td>${formatDate(row.establish_date)}</td>
+                    <td class="num">${fmtNum(row.raise_scale, 2)}</td>
+                    <td>${escapeHtml(row.custodian || "-")}</td>
+                    <td>${escapeHtml(row.manager || "-")}</td>
+                    <td class="num">${row.days_in_stage == null ? "-" : fmtNum(row.days_in_stage)}</td>
+                  </tr>
+                `
+                )
+                .join("")}
+            </tbody>
+          </table>
+        `
+          : `<div class="empty">没有符合筛选条件的产品</div>`;
+      }
+
+      function bindEvents() {
+        $("period-toggle").addEventListener("click", (event) => {
+          const button = event.target.closest("[data-period]");
+          if (!button) return;
+          state.period = button.dataset.period;
+          document.querySelectorAll("#period-toggle .chip").forEach((el) => el.classList.toggle("is-active", el === button));
+          renderAll();
+        });
+        $("reload-btn").addEventListener("click", loadDefaultFiles);
+        $("file-input").addEventListener("change", (event) => {
+          if (event.target.files.length) loadUploadedFiles(event.target.files);
+        });
+        [
+          ["filter-company", "company"],
+          ["filter-type", "type"],
+          ["filter-stage", "stage"],
+          ["filter-sort", "sort"],
+          ["filter-search", "search"],
+        ].forEach(([id, key]) => {
+          $(id).addEventListener("input", (event) => {
+            state.filters[key] = event.target.value;
+            renderDetailTable();
+          });
+        });
+      }
+
+      bindEvents();
+      loadDefaultFiles();
+    </script>
+  </body>
+</html>

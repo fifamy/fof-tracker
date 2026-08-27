@@ -10,6 +10,7 @@
 ## 目录结构
 
 - `index.html`
+- `all-market-funds.html`
 - `styles.css`
 - `app.js`
 - `config/fof_tracker_config.json`
@@ -52,6 +53,8 @@
 - 公司竞争格局
 - 重点公司对比
 - 华夏追赶测算
+- 托管行渠道（2026-05-07 新增独立 tab）
+- 智能简报（密集布局 / 投资时钟 / 软信息看板）
 - 产品详情
 
 本轮新增的情报增强包括：
@@ -177,6 +180,7 @@ http://127.0.0.1:8080/
 - `data/fof_soft_signal_template.csv` 当前已预填 6 只重点在途产品的 `产品ID / 基金名称 / 基金公司`，便于直接补渠道与持有人结构
 - 证监会网页补充数据在脚本中仍会优先尝试；若运行环境与 `neris.csrc.gov.cn` 的 TLS 握手不兼容，脚本会自动回退到本地 Excel 主链路继续生成
 - 若你开着 `VPN / Surge / Clash / Shadowsocks / 系统代理`，证监会网页补充可能会失败；建议把 `neris.csrc.gov.cn`、`csrc.gov.cn` 设为 `DIRECT`，或临时关闭代理后再运行
+- `all-market-funds.html` 是独立的全市场基金发行跟踪页，优先使用在线 XLSX 解析库；若网络不可用，会尝试浏览器内置的轻量解析兜底
 - 当前页面重点展示“近一周”和“今年以来”
 - 若你后续部署到 GitHub Pages，也可以继续保留这套静态结构
 
@@ -213,14 +217,95 @@ https://neris.csrc.gov.cn/alappl/home1/shouye
 
 ## 存量规模口径补充
 
-### 数据与对比口径（基于 `fund_profile_20260331.xlsx`）
+### 数据与对比口径（基于 `fund_profile_20260630_v3_4 copy.xlsx`）
 
-- 对比样本按 `基金画像2025` 工作表的最新公募基金规模口径更新，比较时不再只看“今年新发”基金，而是同时纳入存量基金样本
-- FOF 对比范围扩展到全量存续 FOF / 养老 FOF；按 `2026-03-31` 口径，当前纳入 591 只存量 FOF 产品，可同时做数量和规模比较
-- 规模字段以 `基金规模合计[交易日期] 2026-03-31` 为准；`规模汇总_总计` 显示普通 FOF 最新规模合计为 2600.71 亿元、养老 FOF 为 647.92 亿元
-- 对 `是否缺失最新规模数据_20260331 = 1` 的基金，当前主表口径下已补齐到可用规模值；现有 FOF 样本中共有 39 只保留该标记，便于后续复核来源
+- 对比样本按`基金规模画像`工作表的最新公募基金规模口径更新，比较时同时纳入全量存续FOF样本
+- 按`2026-06-30`口径，当前纳入617只存量FOF产品，覆盖82家基金管理人
+- 最新规模字段为`基金规模合计[交易日期] 2026-06-30`；普通FOF规模合计2682.01亿元、养老FOF规模合计675.49亿元，全市场合计3357.50亿元
+- 工作簿提供的比较基准列为`2025-12-31`，因此系统统一展示实际比较日期，不再把该变化误写成“较上期”或“本季度”
+- 617只FOF均具备2026-06-30最新规模，可用规模覆盖率为100%
 
 ## 更新记录
+
+### 2026-08-27
+
+- 存量规模数据源切换为`fund_profile_20260630_v3_4 copy.xlsx`，默认读取`基金规模画像`工作表
+- 全站存量规模、公司排名、华夏追赶、产品TOP、策略矩阵和托管行画像已按2026-06-30口径重算
+- 规模比较统一展示真实基准日`2025-12-31`；“本季度新发”和“较上期”改为“基准日后新增规模”和动态日期标签
+- 前端资源缓存指纹更新为`v=20260827-scale0630`
+
+### 2026-05-07
+
+本轮重点：修正一批数据口径漏洞 + 新增"托管行渠道"独立模块 + UX 一致性打磨。前端缓存指纹推进到 `v=20260507-ui14`。
+
+#### 一、数据口径与 KPI 修复（snapshot 已重生）
+
+- **存量规模"较上期变化"拆口径**：原来用 `latest_total - prev_total` 计算，会把"上期不存在、本期新发"的产品当成 0→X 全额变化，实测被误高估近 700 亿元。`build_fof_scale_profile` 引入 `_scale_breakdown`，统一输出：
+  - `existing_scale_change`：两期都披露过规模的样本差额（"真存量增长"，本期 +122.09 亿元）
+  - `new_fund_scale` / `new_fund_count`：本期新增产品规模（53 只 / 689.12 亿元，单列）
+  - `removed_fund_scale` / `removed_fund_count`：上期有规模、本期已无样本（清盘下架等）
+  - `comparable_count`：用于做差值的样本数
+  - 公司榜、类型榜、总量层都同步拆解；前端 KPI 拆成"存量增长（同口径）"+"本季度新发产品规模"两张卡，公司表与重点公司卡同步显示同口径增长 + 新发明细
+- **风险 / 持有期默认值改"未识别"**：`extract_risk_bucket` 原来把无关键词的产品默认归到"平衡"，叠加宏观时钟 `watch_risk_buckets=["积极","平衡"]` 会让大部分产品"宏观命中"，失去信号意义。本轮：
+  - 风险桶：未识别返回 `"未识别"`，新增 `"多元配置"` 桶承接"多资产 / 多元 / 配置 / 优选"等关键词
+  - 持有期：未识别返回 `"未标注持有期"`
+  - `MACRO_CLOCK_LIBRARY` 同步去掉对宽口径"平衡"的通配，复苏期改为 `["积极","多元配置"]`，滞胀期改为 `["稳健","平衡","多元配置"]`
+  - 前端 `extractRiskBucket / extractHoldingBucket / getMatrixBuckets / groupByMatrix / getRadarScores` 全部跟进
+  - 实测分布：多元配置 60、稳健 57、未识别 30、积极 6、养老 4、平衡 3，"未识别"独立成桶
+- **`raise_scale` 不再 `fillna(0)`**：所有 KPI / 公司榜 / 重点公司卡 / chase / 趋势 改为 `dropna()`，并暴露 `raise_scale_sample_count` / `raise_scale_missing_count`。前端"募集规模"KPI 备注会显示覆盖度（如 "近一周 0 只成立 · 募集口径覆盖 N/N"），避免"未填规模"被误展示成"募集为 0"
+- **`current_stage` 默认值改 `None`**：`finalize_products` 中默认值从 `"新申报"` 改为 `None`，避免日期全空的"幽灵记录"被错归到新申报
+- **趋势改自然周对齐**：`build_trend` 改为按周一对齐，新增 `week_start / week_end / observed_end / is_partial_week` 字段。包含 as_of_date 当天的那一周打 `is_partial_week=true`，前端 WoW / Sparkline 自动跳过；趋势图柱子改虚线半透明 + "当前周·未完整"角标，避免周内 0 拖累趋势判断
+- **拆 `remarks` 字段**：合并产品时不再让后到的字符串覆盖前面的语义，新增 `task_name / approval_remark / issue_status / issue_stage` 四个独立字段；combined `remarks` 用 ` · ` 拼接，便于前端引用单段
+- **chase benchmark fallback 透明化**：`huaxia_chase.target.benchmark_scope` 暴露 fallback 层级（`top_n / head_limit / all / none`），便于前端区分"基于头部三公司"还是"全市场样本"的测算
+
+#### 二、未来 30 天预测轴：以 as_of_date 为基准
+
+- `buildForecastAxisMarkup` 不再用浏览器 `today`，改用 `state.data.as_of_date` 作为时间轴起点；`getApprovalWindowInsight` 同步加边界判断
+- 越界节点新增视觉处理：`pct < 0` 标 `is-overdue`（红虚线、聚到最左），`pct > 100` 标 `is-beyond`（半透明虚线、聚到最右），不再被强行 clamp 成同一团
+- 主轴左起 0% tick 标"截至 MM/DD"
+
+#### 三、审批效率追踪：前后端口径统一
+
+- `renderEfficiencyBattlefield` 删除前端自算，统一消费后端 `summary.efficiency_diagnosis`，benchmark 公司从配置 `key_companies`（除华夏）一致取数
+- 按"差值天数"分色：> 5 天慢于同业 → 红、< -5 → 绿、其他 → 灰；最大堵点高亮 `is-bottleneck`
+- 卡片内补样本数标注（华夏样本 N 条 / 重点同业样本 M 条）
+
+#### 四、新增"托管行渠道"独立模块（左栏第 5 项）
+
+- 数据源：跟踪流水（4 个 Excel + CSRC 网页补充）+ `fund_profile_20260331.xlsx` 的「基金托管人」字段（591 只历史存量 FOF）
+- `normalize_custodian_name` 别名归并：把"中国工商银行 / 工商银行 / 工行"等合并到统一规范名，并按银行 / 券商 / 其他分类
+- `build_custodian_landscape` 输出两套口径：
+  - **全部基金（含存量画像）**：今年活跃 + 仅画像存量（按基金名称去重）。当前实测 671 只 / 38 家，招行 125 只居首；华夏在招行 8 / 建行 6 / 工行 3 / 中行 3 都有合作
+  - **今年新发**：仅看今年成立或在审的活跃产品。当前 80 只 / 26 家，招行 16 只居首；华夏当前在所有大行都为 0（强信号）
+- 前端结构：
+  - 顶部"数据口径"toggle（全部 / 今年新发）+ 右侧 hint 说明数据来源
+  - 6 张 KPI（已披露 FOF / 覆盖机构数 / 在审 vs 已成立 / 累计募集与存量规模 / 华夏合作行 / 头部托管）
+  - 5 个筛选 tab：全部 / 银行 / 券商·其他 / 华夏已合作 / 华夏未触达
+  - 26~38 张托管行卡片：含华夏合作徽章、横向条形对比、4 宫格小数据（待发行 / 近 30 天动作 / 规模 / 平均单只）、重点公司 chips、合作 TOP、近期产品列表（可点抽屉）
+  - 渠道总表（13 列）便于人工核对或截图
+- 切换数据口径或筛选 tab 时局部刷新，KPI 与 hint 同步更新
+
+#### 五、UX 一致性
+
+- **顶栏数据时效戳**：`#topbar-stamp` 显眼展示「截止 YYYY-MM-DD / 生成时间 / 存量口径季报披露日」，进入任意 tab 都能看到当前数据基准
+- **Tab 可访问性**：`#main-tabs` 加 `role="tablist"` + 每个 tab 的 `role="tab"` / `aria-selected` 联动
+- **切 tab 自动回顶端**：新增 `scrollToTop()` + `switchTab()`，对 `window` / `documentElement` / `body` / `.main` 容器都置 `scrollTop=0`，左栏 rail-nav 与（隐藏的）顶栏 main-tabs 共用入口
+- **首页"华夏全量 FOF"折叠**：改成 `<details>` 速览（默认展示前 5 只 + 在审计数，剩余收纳），减少首页纵向堆叠
+- **小逻辑漏洞**：`alert_count = 0` / `future.events.length = 0` 时 hero pill 不再显示空提醒；`count_gap_vs_focus` 负值正确表达为"落后华夏 N 只"；矩阵在 ≤960px 改为横向滚动（不再被强压成单列堆叠）
+- **gantt-node**：新增 `is-overdue / is-beyond` 样式
+- **efficiency-row**：新增 `tone-slow / tone-fast / tone-even / tone-muted` 分色
+
+#### 六、性能与可维护性
+
+- `getHuaxiaBenchmarkInsight` 引入 `_benchmarkCache`：对 169 只产品反复 O(N²) 比对的开销显著降低；切片或重新加载时自动 `clearInsightCache()`
+- 资源 `?v=` 缓存指纹推进到 `20260507-ui14`，规避旧浏览器缓存
+- `data/fof_tracker_snapshot.json` 体量略增（新增 `custodian_landscape.scopes` 等字段），仍在合理范围
+
+#### 七、注意事项 / 已知现象
+
+- "全部基金"口径下的"在审"列绝大多数显示 0：因为画像表只有"成立后"的产品；今年正在申报 / 受理的产品来自跟踪流水。要看在审动作请切到"今年新发"或"流程跟踪"tab
+- 托管行卡片中的"规模合计"在"全部基金"口径下混合两个口径：募集表的募集份额（亿份≈亿元）+ 画像表的最新规模（亿元），仅作横向比较参考；纯成立侧规模请使用"今年新发"
+- 风险桶把"未识别"独立后，宏观命中数明显下降，是预期行为（之前的"全市场命中"是默认值导致的假信号）
 
 ### 2026-04-24
 

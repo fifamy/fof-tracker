@@ -8,7 +8,7 @@
       name="description"
       content="跟踪全市场公募FOF的申报、受理、获批、发行、成立情况，并支持重点基金公司竞争格局观察。"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260424-ui10" />
+    <link rel="stylesheet" href="./styles.css?v=20260827-scale0630" />
   </head>
   <body>
     <div class="shell">
@@ -48,19 +48,21 @@
             <div class="topbar-title">
               <h2 id="topbar-heading">首页总览</h2>
               <span id="topbar-subheading"></span>
+              <div class="topbar-stamp" id="topbar-stamp"></div>
             </div>
             <div class="toolbar">
               <div class="time-toggle" id="top-period-toggle">
-                <button class="chip is-active" data-period="week">近一周</button>
+                <button class="chip is-active" data-period="week">最近完整周</button>
                 <button class="chip" data-period="ytd">今年以来</button>
               </div>
-              <div class="tab-toggle" id="main-tabs">
-                <button class="tab is-active" data-tab="dashboard">首页总览</button>
-                <button class="tab" data-tab="pipeline">流程跟踪</button>
-                <button class="tab" data-tab="market">公司格局</button>
-                <button class="tab" data-tab="scale">存量与追赶</button>
-                <button class="tab" data-tab="intel">智能简报</button>
-                <button class="tab" data-tab="detail">产品详情</button>
+              <div class="tab-toggle" id="main-tabs" role="tablist" aria-label="模块切换">
+                <button class="tab is-active" data-tab="dashboard" role="tab" aria-selected="true">首页总览</button>
+                <button class="tab" data-tab="pipeline" role="tab" aria-selected="false">流程跟踪</button>
+                <button class="tab" data-tab="market" role="tab" aria-selected="false">公司格局</button>
+                <button class="tab" data-tab="scale" role="tab" aria-selected="false">存量与追赶</button>
+                <button class="tab" data-tab="custodian" role="tab" aria-selected="false">托管行渠道</button>
+                <button class="tab" data-tab="intel" role="tab" aria-selected="false">智能简报</button>
+                <button class="tab" data-tab="detail" role="tab" aria-selected="false">产品详情</button>
               </div>
             </div>
           </section>
@@ -87,8 +89,8 @@
                 <section class="card">
                   <div class="section-head compact">
                     <div>
-                      <h2>近8周成立与募集趋势</h2>
-                      <p>看近期成立数量与募集规模变化。</p>
+                      <h2>近8周流程动作与募集趋势</h2>
+                      <p>看自然周内申报、受理、获批、发行、成立动作，以及成立募集规模变化。</p>
                     </div>
                   </div>
                   <div id="trend-chart"></div>
@@ -174,7 +176,7 @@
                   <span>时间范围</span>
                   <select id="tracker-period">
                     <option value="all">全部</option>
-                    <option value="week">近一周</option>
+                    <option value="week">最近完整周</option>
                     <option value="ytd">今年以来</option>
                   </select>
                 </label>
@@ -232,7 +234,7 @@
               <div class="section-head">
                 <div>
                   <h2>重点公司对比</h2>
-                  <p>基于配置名单，重点观察近一周动作、今年以来推进节奏与在审储备。</p>
+                  <p>基于配置名单，重点观察最近完整周动作、今年以来推进节奏与在审储备。</p>
                 </div>
               </div>
               <div class="company-card-grid" id="key-company-cards"></div>
@@ -242,14 +244,14 @@
               <div class="section-head">
                 <div>
                   <h2>公司竞争格局</h2>
-                  <p>按近一周和今年以来跟踪基金公司动作与成立表现。</p>
+                  <p>按最近完整周和今年以来跟踪基金公司动作与成立表现。</p>
                 </div>
               </div>
               <div class="inline-actions">
                 <div class="toggle-group">
                   <div class="toggle-label">时间维度</div>
                   <div class="subtabs" id="company-period-toggle">
-                    <button class="subtab is-active" data-period="week">近一周</button>
+                    <button class="subtab is-active" data-period="week">最近完整周</button>
                     <button class="subtab" data-period="ytd">今年以来</button>
                   </div>
                 </div>
@@ -319,8 +321,8 @@
               <div class="card">
                 <div class="section-head compact">
                   <div>
-                    <h2>已补齐规模样本</h2>
-                    <p>曾被标记为最新规模缺失，但当前主表口径已补齐的样本。</p>
+                    <h2>规模数据质量复核</h2>
+                    <p>列出被标记为最新规模缺失、但主表已有可用规模的样本；无样本时表示当前无需复核。</p>
                   </div>
                 </div>
                 <div class="table-wrap" id="stock-repaired-table"></div>
@@ -373,6 +375,43 @@
               </div>
               <div class="table-wrap" id="chase-table"></div>
             </div>
+          </section>
+
+          <!-- ============================================================
+               托管行渠道（独立模块）
+               ============================================================ -->
+          <section class="panel" id="panel-custodian">
+            <div class="inline-actions">
+              <div class="toggle-group">
+                <div class="toggle-label">数据口径</div>
+                <div class="subtabs" id="custodian-scope-toggle">
+                  <button class="subtab is-active" data-custodian-scope="all" type="button">全部基金（含存量画像）</button>
+                  <button class="subtab" data-custodian-scope="ytd_new" type="button">今年新发</button>
+                </div>
+              </div>
+              <div class="custodian-scope-hint" id="custodian-scope-hint"></div>
+            </div>
+            <div class="kpi-grid chase-kpi-grid" id="custodian-kpi-grid"></div>
+            <section class="card">
+              <div class="section-head">
+                <div>
+                  <h2>托管行渠道概览</h2>
+                  <p>按托管行（≈代销主渠道）汇总在审 / 已成立 FOF，看头部银行偏好哪些基金公司、华夏在哪些行已经有合作。</p>
+                </div>
+                <div class="subtabs" id="custodian-filter-tabs"></div>
+              </div>
+              <div id="custodian-summary"></div>
+              <div id="custodian-board"></div>
+            </section>
+            <section class="card">
+              <div class="section-head compact">
+                <div>
+                  <h2>渠道总表</h2>
+                  <p>所有披露过托管行的 FOF 按渠道维度展开，便于人工核对与导出。</p>
+                </div>
+              </div>
+              <div class="table-wrap" id="custodian-table"></div>
+            </section>
           </section>
 
           <!-- ============================================================
@@ -440,7 +479,7 @@
       <div class="drawer-body" id="drawer-content"></div>
     </aside>
 
-    <script src="./data/fof_tracker_snapshot.js?v=20260424-ui10"></script>
-    <script src="./app.js?v=20260424-ui10"></script>
+    <script src="./data/fof_tracker_snapshot.js?v=20260827-scale0630"></script>
+    <script src="./app.js?v=20260827-scale0630"></script>
   </body>
 </html>
