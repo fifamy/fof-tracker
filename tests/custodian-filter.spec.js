@@ -37,6 +37,11 @@ test("custodian view uses pure custodian terminology and exposes Huaxia products
   await expect(ccbCard).toContainText("88.9 亿");
   await expect(cmbCard).toContainText("华夏托管 8");
   await expect(cmbCard).toContainText("31.9 亿");
-  await expect(page.locator("#custodian-table thead")).toContainText("画像存量规模(亿元)");
-  await expect(page.locator("#custodian-table thead")).toContainText("成立募集规模(亿元)");
+  const cmbProfileScale = cmbCard.locator('[data-custodian-metric="profile-scale"] strong');
+  const cmbActiveRaiseScale = cmbCard.locator('[data-custodian-metric="active-raise-scale"] strong');
+  await expect(cmbProfileScale).toHaveText("1,030.1 亿");
+  await expect(cmbActiveRaiseScale).toHaveText("351.5 亿");
+  expect(await cmbProfileScale.textContent()).not.toBe(await cmbActiveRaiseScale.textContent());
+  await expect(page.locator("#custodian-table thead")).toContainText("存量规模合计(亿元)");
+  await expect(page.locator("#custodian-table thead")).toContainText("今年成立募集规模(亿元)");
 });

@@ -1629,12 +1629,12 @@ function renderCustodianBoard() {
         note: `合计 ${totalProducts} 只`,
       },
       {
-        label: `画像存量规模（${profileScaleDate}）`,
+        label: `存量规模合计（${profileScaleDate}）`,
         value: profileScaleSamples ? `${fmtNum(profileScaleTotal)} 亿` : "—",
         note: profileProductTotal ? `规模已披露 ${profileScaleSamples}/${profileProductTotal} 只` : "当前口径不含存量画像",
       },
       {
-        label: "成立募集规模",
+        label: "今年成立产品募集规模",
         value: activeRaiseSamples ? `${fmtNum(activeRaiseScaleTotal)} 亿` : "—",
         note: activeEstablishedTotal ? `募集已披露 ${activeRaiseSamples}/${activeEstablishedTotal} 只` : "当前口径无流水成立产品",
       },
@@ -1711,7 +1711,7 @@ function renderCustodianBoard() {
         <em>含申报、受理、获批和发行中</em>
       </div>
       <div class="monitor-stat">
-        <span>画像存量 / 成立募集</span>
+        <span>存量规模合计 / 今年成立募集</span>
         <strong>${fmtNum(profileScaleTotal)} / ${fmtNum(activeRaiseScaleTotal)} 亿</strong>
         <em>两个规模口径分别统计，不相加</em>
       </div>
@@ -1739,11 +1739,11 @@ function renderCustodianBoard() {
           { label: "获批 / 发行", render: (row) => escapeHtml(row.ready_to_issue_count) },
           { label: "管理人数量", render: (row) => escapeHtml(row.company_count) },
           {
-            label: "画像存量规模(亿元)",
+            label: "存量规模合计(亿元)",
             render: (row) => `${fmtNum(row.profile_scale_sum)}（${row.profile_scale_sample_count}/${row.profile_product_count}）`,
           },
           {
-            label: "成立募集规模(亿元)",
+            label: "今年成立募集规模(亿元)",
             render: (row) => `${fmtNum(row.active_raise_scale_sum)}（${row.active_raise_scale_sample_count}/${row.active_established_count}）`,
           },
           {
@@ -1827,7 +1827,7 @@ function renderCustodianBoard() {
               `
             )
             .join("");
-          const scaleNote = `画像存量 ${fmtNum(row.profile_scale_sum)} 亿（${row.profile_scale_sample_count}/${row.profile_product_count}） · 成立募集 ${fmtNum(row.active_raise_scale_sum)} 亿（${row.active_raise_scale_sample_count}/${row.active_established_count}）`;
+          const scaleNote = `存量规模合计 ${fmtNum(row.profile_scale_sum)} 亿（${row.profile_scale_sample_count}/${row.profile_product_count}） · 今年成立募集规模 ${fmtNum(row.active_raise_scale_sum)} 亿（${row.active_raise_scale_sample_count}/${row.active_established_count}）`;
           return `
             <article class="custodian-card ${(row.focus_count || 0) > 0 ? "has-focus" : ""}">
               <div class="custodian-head">
@@ -1846,8 +1846,8 @@ function renderCustodianBoard() {
               <div class="custodian-stats">
                 <div><span>获批 / 发行</span><strong>${escapeHtml(row.ready_to_issue_count)} 只</strong></div>
                 <div><span>近 ${escapeHtml(landscape.recent_window_days || 30)} 天动作</span><strong>${escapeHtml(row.recent_action_count)} 只</strong></div>
-                <div><span>画像存量</span><strong>${row.profile_scale_sample_count ? `${fmtNum(row.profile_scale_sum)} 亿` : "—"}</strong></div>
-                <div><span>成立募集</span><strong>${row.active_raise_scale_sample_count ? `${fmtNum(row.active_raise_scale_sum)} 亿` : "—"}</strong></div>
+                <div data-custodian-metric="profile-scale"><span>存量规模合计</span><strong>${row.profile_scale_sample_count ? `${fmtNum(row.profile_scale_sum)} 亿` : "—"}</strong></div>
+                <div data-custodian-metric="active-raise-scale"><span>今年成立募集</span><strong>${row.active_raise_scale_sample_count ? `${fmtNum(row.active_raise_scale_sum)} 亿` : "—"}</strong></div>
               </div>
               <div class="custodian-meta-row">
                 <span>${escapeHtml(scaleNote)}</span>
