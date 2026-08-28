@@ -2069,7 +2069,7 @@ def build_soft_intel_dashboard(products, soft_intel_path, focus_company="华夏"
 
 
 def normalize_custodian_name(name):
-    """归并托管行常见别名，便于按渠道维度聚合。"""
+    """归并托管人常见别名，便于按托管机构维度聚合。"""
     text = safe_text(name)
     if text == "":
         return ""
@@ -2131,21 +2131,59 @@ def _aggregate_custodian_rows(rows_df, config, as_of_date, focus_company, recent
         product_count = int(len(sub))
         active_sub = sub[sub["source"] == "active"]
         stock_only_sub = sub[sub["source"] == "stock"]
+        profile_sub = sub[sub["has_stock_profile"].fillna(False)]
+        active_established_sub = active_sub[active_sub["current_stage"] == "已成立"]
         in_review_count = int(active_sub["current_stage"].isin(IN_REVIEW_STAGES).sum())
+        pipeline_count = int((active_sub["current_stage"] != "已成立").sum())
         ready_to_issue_count = int(active_sub["current_stage"].isin(["已获批", "发行中"]).sum())
         # 已成立 = active 当中已成立 + 仅在画像表里存在的存量产品
-        established_count = int(active_sub["current_stage"].eq("已成立").sum() + len(stock_only_sub))
+        established_count = int(len(active_established_sub) + len(stock_only_sub))
         company_counts = sub["fund_company"].value_counts()
         company_count = int(company_counts.shape[0])
         key_company_set = sorted([c for c in company_counts.index if c in key_companies])
-        # 募集规模：active 的 raise_scale + 存量画像的 latest_scale 都用作"成立侧规模"参考
-        scale_series = pd.to_numeric(sub["scale_for_landscape"], errors="coerce").dropna()
-        scale_sum = round(float(scale_series.sum()), 2)
-        avg_scale = round(float(scale_series.mean()), 2) if len(scale_series) else None
+        # 存量规模与募集规模分别统计，禁止把两个口径相加。
+        profile_scale_series = (
+            pd.to_numeric(profile_sub["latest_scale"], errors="coerce").dropna()
+            if len(profile_sub)
+            else pd.Series([], dtype=float)
+        )
+        active_raise_scale_series = (
+            pd.to_numeric(active_established_sub["raise_scale"], errors="coerce").dropna()
+            if len(active_established_sub)
+            else pd.Series([], dtype=float)
+        )
+        profile_scale_sum = round(float(profile_scale_series.sum()), 2)
+        active_raise_scale_sum = round(float(active_raise_scale_series.sum()), 2)
+        avg_profile_scale = round(float(profile_scale_series.mean()), 2) if len(profile_scale_series) else None
+        avg_active_raise_scale = round(float(active_raise_scale_series.mean()), 2) if len(active_raise_scale_series) else None
         focus_sub = sub[sub["fund_company"] == focus_company]
+        focus_stock_sub = focus_sub[focus_sub["source"] == "stock"]
+        focus_profile_sub = focus_sub[focus_sub["has_stock_profile"].fillna(False)]
+        focus_active_sub = focus_sub[focus_sub["source"] == "active"]
+        focus_active_established_sub = focus_active_sub[focus_active_sub["current_stage"] == "已成立"]
         focus_count = int(len(focus_sub))
-        focus_in_review = int(focus_sub[focus_sub["source"] == "active"]["current_stage"].isin(IN_REVIEW_STAGES).sum())
-        focus_established = int(focus_count - focus_in_review)
+        focus_pipeline = int((focus_active_sub["current_stage"] != "已成立").sum())
+        focus_in_review = int(focus_active_sub["current_stage"].isin(IN_REVIEW_STAGES).sum())
+        focus_established = int(len(focus_active_established_sub) + len(focus_stock_sub))
+        focus_profile_scale_series = (
+            pd.to_numeric(focus_profile_sub["latest_scale"], errors="coerce").dropna()
+            if len(focus_profile_sub)
+            else pd.Series([], dtype=float)
+        )
+        focus_active_raise_scale_series = (
+            pd.to_numeric(focus_active_established_sub["raise_scale"], errors="coerce").dropna()
+            if len(focus_active_established_sub)
+            else pd.Series([], dtype=float)
+        )
+        focus_products = []
+        if not focus_sub.empty:
+            focus_sorted = focus_sub.copy()
+            focus_sorted["_source_sort"] = focus_sorted["source"].map({"active": 0, "stock": 1}).fillna(2)
+            focus_sorted["_code_sort"] = focus_sorted["security_code"].apply(safe_text)
+            focus_sorted["_name_sort"] = focus_sorted["fund_name"].apply(safe_text)
+            focus_sorted = focus_sorted.sort_values(["_source_sort", "_code_sort", "_name_sort"])
+            for _, focus_row in focus_sorted.iterrows():
+                focus_products.append(_serialize_landscape_record(focus_row))
         recent_sub_dates = pd.to_datetime(sub["latest_event_date"], errors="coerce")
         recent_count = int((recent_sub_dates >= recent_cutoff).sum())
         latest_event_date = recent_sub_dates.max() if recent_sub_dates.notnull().any() else pd.NaT
@@ -2167,35 +2205,55 @@ def _aggregate_custodian_rows(rows_df, config, as_of_date, focus_company, recent
             "kind": custodian_kind(canonical),
             "product_count": product_count,
             "in_review_count": in_review_count,
+            "pipeline_count": pipeline_count,
             "ready_to_issue_count": ready_to_issue_count,
             "established_count": established_count,
+            "profile_product_count": int(len(profile_sub)),
+            "stock_only_product_count": int(len(stock_only_sub)),
+            "active_established_count": int(len(active_established_sub)),
             "company_count": company_count,
             "key_companies": key_company_set,
             "top_companies": [
                 {"fund_company": str(idx), "count": int(val)}
                 for idx, val in company_counts.head(5).items()
             ],
-            "raise_scale_sum": scale_sum,
-            "raise_scale_sample_count": int(len(scale_series)),
-            "raise_scale_missing_count": int(len(sub) - len(scale_series)),
-            "avg_raise_scale": avg_scale,
+            "profile_scale_sum": profile_scale_sum,
+            "profile_scale_sample_count": int(len(profile_scale_series)),
+            "profile_scale_missing_count": int(len(profile_sub) - len(profile_scale_series)),
+            "avg_profile_scale": avg_profile_scale,
+            "active_raise_scale_sum": active_raise_scale_sum,
+            "active_raise_scale_sample_count": int(len(active_raise_scale_series)),
+            "active_raise_scale_missing_count": int(len(active_established_sub) - len(active_raise_scale_series)),
+            "avg_active_raise_scale": avg_active_raise_scale,
             "focus_count": focus_count,
+            "focus_pipeline_count": focus_pipeline,
             "focus_in_review_count": focus_in_review,
             "focus_established_count": focus_established,
+            "focus_profile_scale_sum": round(float(focus_profile_scale_series.sum()), 2),
+            "focus_profile_scale_sample_count": int(len(focus_profile_scale_series)),
+            "focus_active_raise_scale_sum": round(float(focus_active_raise_scale_series.sum()), 2),
+            "focus_active_raise_scale_sample_count": int(len(focus_active_raise_scale_series)),
+            "focus_products": focus_products,
             "recent_action_count": recent_count,
             "latest_event_date": format_date(latest_event_date) if pd.notnull(latest_event_date) else None,
             "recent_products": recent_products,
             "source_scope": source_label,
         })
 
-    out = sorted(out, key=lambda x: (x["product_count"], x["in_review_count"], x["raise_scale_sum"]), reverse=True)
+    out = sorted(
+        out,
+        key=lambda x: (x["product_count"], x["pipeline_count"], x["profile_scale_sum"], x["active_raise_scale_sum"]),
+        reverse=True,
+    )
     return out, int(len(valid))
 
 
 def _serialize_landscape_record(row):
     return {
         "product_id": safe_text(row.get("product_id")) or None,
-        "fund_name": safe_text(row.get("fund_name")) or None,
+        "security_code": safe_text(row.get("security_code")) or None,
+        "fund_name": safe_text(row.get("fund_full_name")) or safe_text(row.get("fund_name")) or None,
+        "fund_short_name": safe_text(row.get("fund_name")) or None,
         "fund_company": safe_text(row.get("fund_company")) or None,
         "fof_type": safe_text(row.get("fof_type")) or None,
         "current_stage": safe_text(row.get("current_stage")) or "已成立",
@@ -2208,51 +2266,93 @@ def _serialize_landscape_record(row):
 
 def _build_custodian_dataframe(active_products, stock_products):
     frames = []
+    active_frame = None
+    stock_frame = None
     if active_products is not None and not active_products.empty:
         a = active_products.copy()
         a["custodian_canonical"] = a["custodian"].apply(normalize_custodian_name)
         a["source"] = "active"
-        a["scale_for_landscape"] = pd.to_numeric(a.get("raise_scale"), errors="coerce")
-        a["latest_scale"] = pd.NA
+        a["latest_scale"] = None
+        a["has_stock_profile"] = False
         if "product_id" not in a.columns:
             a["product_id"] = None
-        frames.append(a[[
-            "custodian_canonical", "source", "fund_company", "fof_type", "fund_name",
-            "current_stage", "latest_event_date", "raise_scale", "latest_scale",
-            "scale_for_landscape", "product_id"
-        ]])
+        if "security_code" not in a.columns:
+            a["security_code"] = None
+        if "fund_full_name" not in a.columns:
+            a["fund_full_name"] = a["fund_name"]
+        a["_active_name_key"] = a["fund_name"].apply(normalize_fund_name)
+        active_frame = a
     if stock_products is not None and not stock_products.empty:
-        active_keys = set()
-        if active_products is not None and not active_products.empty:
-            for _, r in active_products.iterrows():
-                key = normalize_fund_name(r.get("fund_name"))
-                if key:
-                    active_keys.add(key)
         s = stock_products.copy()
+        if "fund_full_name" not in s.columns:
+            s["fund_full_name"] = s["fund_name"]
+        if "security_code" not in s.columns:
+            s["security_code"] = None
         s["fund_name_key"] = s["fund_name"].apply(normalize_fund_name)
-        # 仅保留不在 active 集合里的存量产品（避免重复计数）
-        s = s[~s["fund_name_key"].isin(active_keys)].copy()
+        s["fund_full_name_key"] = s["fund_full_name"].apply(normalize_fund_name)
+        matched_stock_indices = set()
+        if active_frame is not None and not active_frame.empty:
+            for stock_idx, stock_row in s.iterrows():
+                candidate_keys = set([
+                    safe_text(stock_row.get("fund_name_key")),
+                    safe_text(stock_row.get("fund_full_name_key")),
+                ])
+                candidate_keys.discard("")
+                if not candidate_keys:
+                    continue
+                match_indices = active_frame.index[active_frame["_active_name_key"].isin(candidate_keys)].tolist()
+                if not match_indices:
+                    continue
+                matched_stock_indices.add(stock_idx)
+                for active_idx in match_indices:
+                    active_frame.at[active_idx, "has_stock_profile"] = True
+                    active_frame.at[active_idx, "latest_scale"] = stock_row.get("latest_scale")
+                    stock_custodian = normalize_custodian_name(stock_row.get("custodian"))
+                    if safe_text(active_frame.at[active_idx, "custodian_canonical"]) == "" and stock_custodian:
+                        active_frame.at[active_idx, "custodian_canonical"] = stock_custodian
+                    stock_establish_date = pd.to_datetime(stock_row.get("fund_establish_date"), errors="coerce")
+                    if pd.notnull(stock_establish_date):
+                        active_frame.at[active_idx, "current_stage"] = "已成立"
+                        active_event_date = pd.to_datetime(
+                            active_frame.at[active_idx, "latest_event_date"], errors="coerce"
+                        )
+                        if pd.isnull(active_event_date) or stock_establish_date > active_event_date:
+                            active_frame.at[active_idx, "latest_event_date"] = stock_establish_date
+                    if safe_text(active_frame.at[active_idx, "security_code"]) == "":
+                        active_frame.at[active_idx, "security_code"] = stock_row.get("security_code")
+                    if safe_text(stock_row.get("fund_full_name")):
+                        active_frame.at[active_idx, "fund_full_name"] = stock_row.get("fund_full_name")
+            if matched_stock_indices:
+                s = s.drop(list(matched_stock_indices)).copy()
         s["custodian_canonical"] = s["custodian"].apply(normalize_custodian_name)
         s["source"] = "stock"
+        s["has_stock_profile"] = True
         s["current_stage"] = "已成立"
         s["latest_event_date"] = pd.to_datetime(s.get("fund_establish_date"), errors="coerce")
-        s["raise_scale"] = pd.NA
-        s["scale_for_landscape"] = pd.to_numeric(s.get("latest_scale"), errors="coerce")
+        s["raise_scale"] = None
         if "product_id" not in s.columns:
             s["product_id"] = s["security_code"].apply(lambda x: "STOCK_" + safe_text(x))
-        frames.append(s[[
-            "custodian_canonical", "source", "fund_company", "fof_type", "fund_name",
-            "current_stage", "latest_event_date", "raise_scale", "latest_scale",
-            "scale_for_landscape", "product_id"
-        ]])
+        stock_frame = s
+    keep_cols = [
+        "custodian_canonical", "source", "fund_company", "fof_type", "fund_name", "fund_full_name", "security_code",
+        "current_stage", "latest_event_date", "raise_scale", "latest_scale", "has_stock_profile", "product_id",
+    ]
+    if active_frame is not None:
+        frames.append(active_frame[keep_cols])
+    if stock_frame is not None:
+        frames.append(stock_frame[keep_cols])
     if not frames:
         return pd.DataFrame()
-    frames = [frame.dropna(axis=1, how="all") for frame in frames]
-    return pd.concat(frames, ignore_index=True)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="The behavior of DataFrame concatenation with empty or all-NA entries is deprecated",
+        )
+        return pd.concat(frames, ignore_index=True)
 
 
 def build_custodian_landscape(active_products, stock_products, config, as_of_date, focus_company="华夏", recent_days=30):
-    """按托管行（≈代销主渠道）汇总 FOF 跟踪数据，输出 全部 / 今年新发 两套口径。"""
+    """按基金托管人汇总 FOF 跟踪数据，输出全部 / 今年新发两套口径。"""
     combined = _build_custodian_dataframe(active_products, stock_products)
     if combined.empty:
         return {
@@ -2281,14 +2381,7 @@ def build_custodian_landscape(active_products, stock_products, config, as_of_dat
     ytd_rows, ytd_with = _aggregate_custodian_rows(ytd_df, config, as_of_date, focus_company, recent_days, "ytd_new")
 
     total_active = int(active_products.shape[0]) if active_products is not None else 0
-    total_stock_extra = 0
-    if stock_products is not None and not stock_products.empty:
-        active_keys = set()
-        if active_products is not None and not active_products.empty:
-            active_keys = set(normalize_fund_name(n) for n in active_products["fund_name"].tolist())
-        total_stock_extra = int(sum(
-            1 for n in stock_products["fund_name"].tolist() if normalize_fund_name(n) not in active_keys
-        ))
+    total_stock_extra = int((combined["source"] == "stock").sum())
 
     leader_all = all_rows[0] if all_rows else None
     leader_ytd = ytd_rows[0] if ytd_rows else None
@@ -2333,9 +2426,9 @@ def build_custodian_landscape(active_products, stock_products, config, as_of_dat
         "stock_only_count": total_stock_extra,
         "notes": [
             "「全部基金」= 募集/成立表里已披露托管行的产品 + 基金画像表里的存量 FOF（按基金名称去重，画像里来自季报披露日 latest 口径）。",
-            "「今年新发」= 仅看今年（YTD）首次出现在跟踪流水里的 FOF（成立日 / 最新事件落在今年），用于看本年度新增渠道选择。",
-            "已成立 = 当前 stage = 已成立 或 来自存量画像；存量画像中产品以 latest_scale 作为规模口径（亿元），募集表口径以总募集份额近似为亿元。",
-            "key_companies / focus_count 用于看华夏在该渠道是否已有合作，作为后续渠道争取优先级参考。",
+            "「今年新发」= 仅看今年（YTD）首次出现在跟踪流水里的 FOF（成立日 / 最新事件落在今年），用于看本年度新增托管结构。",
+            "已成立 = 当前 stage = 已成立 或来自存量画像；存量画像的 latest_scale 与募集表的总募集份额分别统计，不相加。",
+            "key_companies / focus_count 用于统计各托管机构对应的重点基金管理人与华夏 FOF 产品数量。",
         ],
     }
 

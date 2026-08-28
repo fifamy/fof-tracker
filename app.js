@@ -37,7 +37,7 @@ const RAIL_NAV_ITEMS = [
   { tab: "pipeline", label: "流程跟踪", note: "在审雷达 / 跟踪总表" },
   { tab: "market", label: "公司格局", note: "对标与竞争分析" },
   { tab: "scale", label: "存量与追赶", note: "存量规模 / 追赶测算" },
-  { tab: "custodian", label: "托管行渠道", note: "托管/代销渠道画像" },
+  { tab: "custodian", label: "托管行统计", note: "托管机构 / 产品明细" },
   { tab: "intel", label: "智能简报", note: "密集布局 / 软信息" },
   { tab: "detail", label: "产品详情", note: "单品穿透" },
 ];
@@ -47,7 +47,7 @@ const TAB_HEADINGS = {
   pipeline: { title: "流程跟踪", sub: "在审情报雷达 / 阶段动态 / 全量跟踪总表" },
   market: { title: "公司格局", sub: "全景大盘 / 重点公司对比 / 竞争格局" },
   scale: { title: "存量与追赶", sub: "最新规模画像 / 华夏追赶头部前三测算" },
-  custodian: { title: "托管行渠道", sub: "托管行 ≈ 主销渠道，观察头部行偏好与华夏覆盖" },
+  custodian: { title: "托管行统计", sub: "按基金托管人统计产品数量、管理人分布与规模口径" },
   intel: { title: "智能简报", sub: "密集布局 / 投资时钟 / 发行软信息" },
   detail: { title: "产品详情", sub: "单品推进链路与耗时诊断" },
 };
@@ -378,19 +378,7 @@ function getHolderStructureGuess(product) {
 }
 
 function getPredictedChannel(product) {
-  const custodian = String(product.custodian || "");
-  const fundCompany = String(product.fund_company || "");
-  const manager = String(product.manager || "");
-  if (/工商银行|工行/.test(custodian)) return "工行主代销概率较高";
-  if (/建设银行|建行/.test(custodian)) return "建行主代销概率较高";
-  if (/农业银行|农行/.test(custodian)) return "农行主代销概率较高";
-  if (/中国银行|中行/.test(custodian)) return "中行主代销概率较高";
-  if (/招商银行|招行/.test(custodian)) return "招行零售渠道概率较高";
-  if (/交通银行|交行/.test(custodian)) return "交行渠道可重点跟踪";
-  if (/证券|中信建投|华泰|国泰君安|东方证券/.test(custodian)) return "券商自有渠道概率较高";
-  if (manager && /养老/.test(product.fund_name || "")) return `${manager} 相关养老客群渠道可重点跟踪`;
-  if (/华夏|易方达|汇添富|富国/.test(fundCompany)) return "大行 + 第三方平台双线推进概率较高";
-  return "待结合托管行与历史合作渠道补录";
+  return product.launch_channels ? null : "未录入；系统不根据托管人推断销售渠道";
 }
 
 function getDynamicHolderProbability(product) {
@@ -1564,8 +1552,8 @@ const CUSTODIAN_FILTERS = [
   { key: "all", label: "全部" },
   { key: "bank", label: "银行" },
   { key: "broker", label: "券商 / 其他" },
-  { key: "huaxia", label: "华夏已合作" },
-  { key: "huaxia_gap", label: "华夏未触达" },
+  { key: "huaxia", label: "有华夏托管" },
+  { key: "huaxia_gap", label: "暂无华夏托管" },
 ];
 
 function renderCustodianBoard() {
@@ -1583,6 +1571,8 @@ function renderCustodianBoard() {
   state.custodianScope = scopeKey;
   const scope = scopes[scopeKey] || { rows: [], total_with_custodian: 0, row_count: 0, label: "" };
   const allRows = scope.rows || [];
+  const scaleProfile = state.data.summary.fof_scale_profile || {};
+  const profileScaleDate = scaleProfile.scale_as_of_date || "最新画像日";
 
   if (scopeToggle) {
     scopeToggle.querySelectorAll("[data-custodian-scope]").forEach((btn) => {
@@ -1600,20 +1590,25 @@ function renderCustodianBoard() {
   }
   if (scopeHint) {
     scopeHint.innerHTML = scopeKey === "ytd_new"
-      ? `今年新发：仅看 ${escapeHtml(state.data.as_of_date)} 之前今年成立 / 在审的 FOF（活跃流水），用于看本年度渠道选择。`
-      : `全部基金：含 ${escapeHtml(landscape.active_universe_count ?? 0)} 只今年活跃产品 + ${escapeHtml(landscape.stock_only_count ?? 0)} 只仅在画像表中的存量产品（按基金名称去重）。`;
+      ? `今年新发：仅看截至 ${escapeHtml(state.data.as_of_date)} 今年成立 / 在途且已披露托管人的 FOF。`
+      : `全部基金：跟踪流水与 ${escapeHtml(profileScaleDate)} 存量画像合并，优先按基金全称去重。`;
   }
 
   if (kpiEl) {
     const totalProducts = allRows.reduce((sum, r) => sum + (r.product_count || 0), 0);
-    const inReviewTotal = allRows.reduce((sum, r) => sum + (r.in_review_count || 0), 0);
+    const pipelineTotal = allRows.reduce((sum, r) => sum + (r.pipeline_count || 0), 0);
     const establishedTotal = allRows.reduce((sum, r) => sum + (r.established_count || 0), 0);
-    const scaleTotal = allRows.reduce((sum, r) => sum + (Number(r.raise_scale_sum) || 0), 0);
-    const huaxiaCovered = allRows.filter((r) => (r.focus_count || 0) > 0).length;
+    const profileScaleTotal = allRows.reduce((sum, r) => sum + (Number(r.profile_scale_sum) || 0), 0);
+    const profileScaleSamples = allRows.reduce((sum, r) => sum + (r.profile_scale_sample_count || 0), 0);
+    const profileProductTotal = allRows.reduce((sum, r) => sum + (r.profile_product_count || 0), 0);
+    const activeRaiseScaleTotal = allRows.reduce((sum, r) => sum + (Number(r.active_raise_scale_sum) || 0), 0);
+    const activeRaiseSamples = allRows.reduce((sum, r) => sum + (r.active_raise_scale_sample_count || 0), 0);
+    const activeEstablishedTotal = allRows.reduce((sum, r) => sum + (r.active_established_count || 0), 0);
+    const huaxiaCustodians = allRows.filter((r) => (r.focus_count || 0) > 0).length;
     const huaxiaProducts = allRows.reduce((sum, r) => sum + (r.focus_count || 0), 0);
+    const huaxiaProfileScale = allRows.reduce((sum, r) => sum + (Number(r.focus_profile_scale_sum) || 0), 0);
     const banks = allRows.filter((r) => r.kind === "银行").length;
     const others = allRows.length - banks;
-    const top = allRows[0];
     const scopeLabel = scope.label || (scopeKey === "ytd_new" ? "今年新发" : "全部基金");
     const kpiItems = [
       {
@@ -1621,7 +1616,7 @@ function renderCustodianBoard() {
         value: `${scope.total_with_custodian ?? 0}`,
         note: scopeKey === "all"
           ? `今年活跃 ${landscape.active_universe_count ?? 0} + 仅画像 ${landscape.stock_only_count ?? 0}`
-          : "今年成立 / 在审，未披露托管行的多为申报阶段",
+          : "今年成立 / 在途，未披露托管人的多为早期申报阶段",
       },
       {
         label: "覆盖托管机构",
@@ -1629,24 +1624,24 @@ function renderCustodianBoard() {
         note: `银行 ${banks} 家 · 券商/其他 ${others} 家`,
       },
       {
-        label: "在审 / 已成立",
-        value: `${inReviewTotal} / ${establishedTotal}`,
+        label: "在途 / 已成立",
+        value: `${pipelineTotal} / ${establishedTotal}`,
         note: `合计 ${totalProducts} 只`,
       },
       {
-        label: "累计募集 / 存量规模",
-        value: `${fmtNum(scaleTotal)} 亿`,
-        note: scopeKey === "all" ? "募集口径 + 画像最新规模合计" : "仅含已披露募集规模的成立产品",
+        label: `画像存量规模（${profileScaleDate}）`,
+        value: profileScaleSamples ? `${fmtNum(profileScaleTotal)} 亿` : "—",
+        note: profileProductTotal ? `规模已披露 ${profileScaleSamples}/${profileProductTotal} 只` : "当前口径不含存量画像",
       },
       {
-        label: "华夏合作行",
-        value: `${huaxiaCovered}`,
-        note: `产品 ${huaxiaProducts} 只 · 占可披露口径 ${scope.row_count ? fmtNum((huaxiaCovered / scope.row_count) * 100, 0) : 0}%`,
+        label: "成立募集规模",
+        value: activeRaiseSamples ? `${fmtNum(activeRaiseScaleTotal)} 亿` : "—",
+        note: activeEstablishedTotal ? `募集已披露 ${activeRaiseSamples}/${activeEstablishedTotal} 只` : "当前口径无流水成立产品",
       },
       {
-        label: top ? `头部托管：${top.custodian}` : "头部托管",
-        value: top ? `${top.product_count} 只` : "—",
-        note: top ? `在审 ${top.in_review_count} · 已成立 ${top.established_count} · 合作 ${top.company_count} 家` : "暂无数据",
+        label: "华夏托管机构",
+        value: `${huaxiaCustodians}`,
+        note: `产品 ${huaxiaProducts} 只${huaxiaProfileScale ? ` · 画像规模 ${fmtNum(huaxiaProfileScale)} 亿` : ""}`,
       },
     ];
     kpiEl.innerHTML = kpiItems
@@ -1680,7 +1675,7 @@ function renderCustodianBoard() {
     boardEl.innerHTML = `<div class="empty-box">${escapeHtml(
       landscape.notes && landscape.notes[0] ? landscape.notes[0] : "托管行通常在产品进入发行阶段后才披露，因此早期数据为空属正常。"
     )}</div>`;
-    if (tableEl) tableEl.innerHTML = `<div class="empty-box">暂无渠道总表数据。</div>`;
+    if (tableEl) tableEl.innerHTML = `<div class="empty-box">暂无托管统计数据。</div>`;
     return;
   }
 
@@ -1693,10 +1688,10 @@ function renderCustodianBoard() {
     return true;
   };
   const rows = allRows.filter(filterFn);
-  const totalProducts = allRows.reduce((sum, r) => sum + (r.product_count || 0), 0);
-  const huaxiaCovered = allRows.filter((r) => (r.focus_count || 0) > 0).length;
-  const inReviewTotal = allRows.reduce((sum, r) => sum + (r.in_review_count || 0), 0);
-  const scaleTotal = allRows.reduce((sum, r) => sum + (Number(r.raise_scale_sum) || 0), 0);
+  const huaxiaCustodians = allRows.filter((r) => (r.focus_count || 0) > 0).length;
+  const pipelineTotal = allRows.reduce((sum, r) => sum + (r.pipeline_count || 0), 0);
+  const profileScaleTotal = allRows.reduce((sum, r) => sum + (Number(r.profile_scale_sum) || 0), 0);
+  const activeRaiseScaleTotal = allRows.reduce((sum, r) => sum + (Number(r.active_raise_scale_sum) || 0), 0);
 
   summaryEl.innerHTML = `
     <div class="monitor-summary">
@@ -1711,57 +1706,60 @@ function renderCustodianBoard() {
         <em>当前筛选命中 ${escapeHtml(rows.length)} 家</em>
       </div>
       <div class="monitor-stat">
-        <span>合计在审 FOF</span>
-        <strong>${escapeHtml(inReviewTotal)} 只</strong>
-        <em>注：含申报、受理、获批、发行中</em>
+        <span>合计在途 FOF</span>
+        <strong>${escapeHtml(pipelineTotal)} 只</strong>
+        <em>含申报、受理、获批和发行中</em>
       </div>
       <div class="monitor-stat">
-        <span>累计募集 / 存量规模</span>
-        <strong>${fmtNum(scaleTotal)} 亿</strong>
-        <em>${scopeKey === "all" ? "募集口径 + 画像最新规模合计" : "仅含已披露募集规模的成立产品"}</em>
+        <span>画像存量 / 成立募集</span>
+        <strong>${fmtNum(profileScaleTotal)} / ${fmtNum(activeRaiseScaleTotal)} 亿</strong>
+        <em>两个规模口径分别统计，不相加</em>
       </div>
       <div class="monitor-stat">
-        <span>华夏合作行</span>
-        <strong>${escapeHtml(huaxiaCovered)} 家</strong>
-        <em>占可披露口径 ${scope.row_count ? fmtNum((huaxiaCovered / scope.row_count) * 100, 0) : 0}%</em>
+        <span>华夏托管机构</span>
+        <strong>${escapeHtml(huaxiaCustodians)} 家</strong>
+        <em>只统计基金托管关系</em>
       </div>
     </div>
   `;
 
   if (tableEl) {
     if (!allRows.length) {
-      tableEl.innerHTML = `<div class="empty-box">暂无可展示的渠道总表数据。</div>`;
+      tableEl.innerHTML = `<div class="empty-box">暂无可展示的托管统计数据。</div>`;
     } else if (!rows.length) {
-      tableEl.innerHTML = `<div class="empty-box">当前筛选条件下暂无渠道总表数据。</div>`;
+      tableEl.innerHTML = `<div class="empty-box">当前筛选条件下暂无托管统计数据。</div>`;
     } else {
       tableEl.innerHTML = tableMarkup(
         [
           { label: "托管行", key: "custodian" },
           { label: "类型", render: (row) => escapeHtml(row.kind) },
           { label: "FOF 总数", render: (row) => escapeHtml(row.product_count) },
-          { label: "在审", render: (row) => escapeHtml(row.in_review_count) },
+          { label: "在途", render: (row) => escapeHtml(row.pipeline_count) },
           { label: "已成立", render: (row) => escapeHtml(row.established_count) },
-          { label: "待发行", render: (row) => escapeHtml(row.ready_to_issue_count) },
-          { label: "合作公司", render: (row) => escapeHtml(row.company_count) },
+          { label: "获批 / 发行", render: (row) => escapeHtml(row.ready_to_issue_count) },
+          { label: "管理人数量", render: (row) => escapeHtml(row.company_count) },
           {
-            label: "募集规模(亿元)",
-            render: (row) => `${fmtNum(row.raise_scale_sum)}（${row.raise_scale_sample_count}/${row.established_count}）`,
+            label: "画像存量规模(亿元)",
+            render: (row) => `${fmtNum(row.profile_scale_sum)}（${row.profile_scale_sample_count}/${row.profile_product_count}）`,
           },
-          { label: "平均单只(亿元)", render: (row) => fmtNum(row.avg_raise_scale) },
+          {
+            label: "成立募集规模(亿元)",
+            render: (row) => `${fmtNum(row.active_raise_scale_sum)}（${row.active_raise_scale_sample_count}/${row.active_established_count}）`,
+          },
           {
             label: `近${landscape.recent_window_days || 30}天动作`,
             render: (row) => escapeHtml(row.recent_action_count),
           },
           {
-            label: "华夏覆盖",
+            label: "华夏托管产品",
             render: (row) =>
               row.focus_count
-                ? `<span class="table-tag focus">${escapeHtml(row.focus_count)}${row.focus_in_review_count ? ` · 在途 ${escapeHtml(row.focus_in_review_count)}` : ""}</span>`
+                ? `<span class="table-tag focus">${escapeHtml(row.focus_count)}${row.focus_pipeline_count ? ` · 在途 ${escapeHtml(row.focus_pipeline_count)}` : ""}</span>`
                 : "—",
           },
           { label: "最近动作", render: (row) => fmtDate(row.latest_event_date) },
           {
-            label: "合作 TOP",
+            label: "管理人 TOP",
             render: (row) =>
               (row.top_companies || [])
                 .slice(0, 3)
@@ -1787,14 +1785,32 @@ function renderCustodianBoard() {
         .map((row) => {
           const widthPct = Math.max(8, ((row.product_count || 0) / maxProducts) * 100);
           const focusBadge = (row.focus_count || 0) > 0
-            ? `<span class="custodian-pill is-focus">华夏已合作 ${row.focus_count}${row.focus_in_review_count ? ` · 在途 ${row.focus_in_review_count}` : ""}</span>`
-            : `<span class="custodian-pill is-gap">华夏未触达</span>`;
+            ? `<span class="custodian-pill is-focus">华夏托管 ${row.focus_count}${row.focus_pipeline_count ? ` · 在途 ${row.focus_pipeline_count}` : ""}</span>`
+            : `<span class="custodian-pill is-gap">暂无华夏托管</span>`;
           const keyChips = (row.key_companies || [])
             .map((c) => `<span class="custodian-key-chip">${escapeHtml(c)}</span>`)
             .join("");
           const topCompanies = (row.top_companies || [])
             .map((c) => `${escapeHtml(c.fund_company)}·${c.count}`)
             .join("、");
+          const focusProducts = (row.focus_products || [])
+            .map((p) => {
+              const scaleText = p.latest_scale != null
+                ? `${profileScaleDate} 规模 ${fmtNum(p.latest_scale)} 亿`
+                : p.raise_scale != null
+                  ? `成立募集 ${fmtNum(p.raise_scale)} 亿`
+                  : "规模未披露";
+              return `
+                <div class="custodian-focus-item">
+                  <div class="custodian-focus-main">
+                    <span class="custodian-focus-code">${escapeHtml(p.security_code || "在途")}</span>
+                    <strong>${escapeHtml(p.fund_name || p.fund_short_name || "未命名产品")}</strong>
+                  </div>
+                  <div class="custodian-focus-meta">${escapeHtml(p.fof_type || "FOF")} · ${escapeHtml(p.current_stage || "—")} · ${escapeHtml(scaleText)}</div>
+                </div>
+              `;
+            })
+            .join("");
           const recent = (row.recent_products || [])
             .slice(0, 3)
             .map(
@@ -1811,41 +1827,50 @@ function renderCustodianBoard() {
               `
             )
             .join("");
-          const scaleNote = row.raise_scale_sample_count
-            ? `成立募集 ${fmtNum(row.raise_scale_sum)} 亿（${row.raise_scale_sample_count}/${row.established_count} 已披露）`
-            : `成立 ${row.established_count} 只 · 募集口径未披露`;
+          const scaleNote = `画像存量 ${fmtNum(row.profile_scale_sum)} 亿（${row.profile_scale_sample_count}/${row.profile_product_count}） · 成立募集 ${fmtNum(row.active_raise_scale_sum)} 亿（${row.active_raise_scale_sample_count}/${row.active_established_count}）`;
           return `
             <article class="custodian-card ${(row.focus_count || 0) > 0 ? "has-focus" : ""}">
               <div class="custodian-head">
                 <div>
                   <div class="custodian-name">${escapeHtml(row.custodian)}</div>
                   <div class="custodian-meta">
-                    ${escapeHtml(row.kind)} · 合作公司 ${escapeHtml(row.company_count)} 家 · 最近动作 ${fmtDate(row.latest_event_date)}
+                    ${escapeHtml(row.kind)} · 管理人 ${escapeHtml(row.company_count)} 家 · 最近动作 ${fmtDate(row.latest_event_date)}
                   </div>
                 </div>
                 ${focusBadge}
               </div>
               <div class="custodian-bar">
                 <div class="custodian-bar-fill" style="width:${widthPct.toFixed(1)}%"></div>
-                <span class="custodian-bar-meta">FOF 总数 ${escapeHtml(row.product_count)} · 在审 ${escapeHtml(row.in_review_count)} · 已成立 ${escapeHtml(row.established_count)}</span>
+                <span class="custodian-bar-meta">FOF 总数 ${escapeHtml(row.product_count)} · 在途 ${escapeHtml(row.pipeline_count)} · 已成立 ${escapeHtml(row.established_count)}</span>
               </div>
               <div class="custodian-stats">
-                <div><span>待发行</span><strong>${escapeHtml(row.ready_to_issue_count)} 只</strong></div>
+                <div><span>获批 / 发行</span><strong>${escapeHtml(row.ready_to_issue_count)} 只</strong></div>
                 <div><span>近 ${escapeHtml(landscape.recent_window_days || 30)} 天动作</span><strong>${escapeHtml(row.recent_action_count)} 只</strong></div>
-                <div><span>规模合计</span><strong>${fmtNum(row.raise_scale_sum)} 亿</strong></div>
-                <div><span>平均单只</span><strong>${row.avg_raise_scale != null ? `${fmtNum(row.avg_raise_scale)} 亿` : "—"}</strong></div>
+                <div><span>画像存量</span><strong>${row.profile_scale_sample_count ? `${fmtNum(row.profile_scale_sum)} 亿` : "—"}</strong></div>
+                <div><span>成立募集</span><strong>${row.active_raise_scale_sample_count ? `${fmtNum(row.active_raise_scale_sum)} 亿` : "—"}</strong></div>
               </div>
               <div class="custodian-meta-row">
                 <span>${escapeHtml(scaleNote)}</span>
               </div>
               ${
                 keyChips
-                  ? `<div class="custodian-keys"><span class="custodian-keys-label">重点公司：</span>${keyChips}</div>`
+                  ? `<div class="custodian-keys"><span class="custodian-keys-label">重点管理人：</span>${keyChips}</div>`
                   : ""
               }
               ${
                 topCompanies
-                  ? `<div class="custodian-meta-row"><span>合作 TOP：${escapeHtml(topCompanies)}</span></div>`
+                  ? `<div class="custodian-meta-row"><span>管理人 TOP：${escapeHtml(topCompanies)}</span></div>`
+                  : ""
+              }
+              ${
+                focusProducts
+                  ? `<details class="custodian-focus-products" ${state.custodianFilter === "huaxia" ? "open" : ""}>
+                      <summary>
+                        <span>华夏托管产品 ${escapeHtml(row.focus_count)} 只</span>
+                        <strong>${row.focus_profile_scale_sample_count ? `${fmtNum(row.focus_profile_scale_sum)} 亿` : "查看明细"}</strong>
+                      </summary>
+                      <div class="custodian-focus-list">${focusProducts}</div>
+                    </details>`
                   : ""
               }
               ${

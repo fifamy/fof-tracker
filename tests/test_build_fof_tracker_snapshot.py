@@ -124,6 +124,82 @@ class BuildFofTrackerSnapshotTests(unittest.TestCase):
         self.assertEqual(1, profile["latest_scale_missing_count"])
         self.assertEqual(50.0, profile["latest_scale_coverage_pct"])
 
+    def test_custodian_landscape_separates_profile_scale_and_raise_scale(self):
+        active = pd.DataFrame(
+            [
+                {
+                    "product_id": "ACTIVE_A",
+                    "fund_name": "华夏测试FOF",
+                    "fund_full_name": "华夏测试基金中基金(FOF)",
+                    "security_code": "000001.OF",
+                    "fund_company": "华夏",
+                    "fof_type": "普通FOF",
+                    "custodian": "",
+                    "current_stage": "已获批",
+                    "latest_event_date": pd.Timestamp("2026-02-01"),
+                    "raise_scale": 5.0,
+                }
+            ]
+        )
+        stock = pd.DataFrame(
+            [
+                {
+                    "security_code": "000001.OF",
+                    "fund_name": "华夏测试FOF",
+                    "fund_full_name": "华夏测试基金中基金(FOF)",
+                    "fund_company": "华夏",
+                    "fof_type": "普通FOF",
+                    "custodian": "招商银行",
+                    "fund_establish_date": pd.Timestamp("2026-03-01"),
+                    "latest_scale": 12.0,
+                }
+            ]
+        )
+
+        landscape = self.builder.build_custodian_landscape(
+            active,
+            stock,
+            {"key_companies": ["华夏"]},
+            pd.Timestamp("2026-06-30"),
+        )
+        row = landscape["scopes"]["all"]["rows"][0]
+
+        self.assertEqual(1, row["product_count"])
+        self.assertEqual("招商银行", row["custodian"])
+        self.assertEqual(0, row["pipeline_count"])
+        self.assertEqual(1, row["established_count"])
+        self.assertEqual(12.0, row["profile_scale_sum"])
+        self.assertEqual(5.0, row["active_raise_scale_sum"])
+        self.assertNotIn("raise_scale_sum", row)
+        self.assertEqual("000001.OF", row["focus_products"][0]["security_code"])
+        self.assertEqual("华夏测试基金中基金(FOF)", row["focus_products"][0]["fund_name"])
+
+    def test_real_profile_custodian_huaxia_lists_match_expected_banks(self):
+        profile_df, _ = self.builder.load_fund_profile_data(self.builder.DEFAULT_PROFILE_FILE)
+        combined = self.builder._build_custodian_dataframe(pd.DataFrame(), profile_df)
+        rows, _ = self.builder._aggregate_custodian_rows(
+            combined,
+            {"key_companies": ["华夏"]},
+            pd.Timestamp("2026-08-28"),
+            "华夏",
+            30,
+            "all",
+        )
+        by_custodian = {row["custodian"]: row for row in rows}
+
+        self.assertEqual(8, by_custodian["招商银行"]["focus_count"])
+        self.assertEqual(31.93, by_custodian["招商银行"]["focus_profile_scale_sum"])
+        self.assertEqual(6, by_custodian["中国建设银行"]["focus_count"])
+        self.assertEqual(88.87, by_custodian["中国建设银行"]["focus_profile_scale_sum"])
+        self.assertEqual(
+            "华夏行业配置股票型基金中基金(FOF-LOF)",
+            next(
+                item["fund_name"]
+                for item in by_custodian["中国建设银行"]["focus_products"]
+                if item["security_code"] == "501217.OF"
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

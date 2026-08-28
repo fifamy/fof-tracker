@@ -19,3 +19,24 @@ test("custodian filter updates board and table consistently", async ({ page }) =
   expect(brokerTableTypes.length).toBeGreaterThan(0);
   expect(brokerTableTypes.every((text) => text.trim() !== "银行")).toBeTruthy();
 });
+
+test("custodian view uses pure custodian terminology and exposes Huaxia products", async ({ page }) => {
+  await page.goto(process.env.BASE_URL || "http://127.0.0.1:8799/");
+  await page.locator('#rail-nav [data-tab="custodian"]').click();
+
+  await expect(page.locator("#panel-custodian")).toContainText("托管行统计概览");
+  await expect(page.locator("#panel-custodian")).not.toContainText("主销渠道");
+  await expect(page.locator("#panel-custodian")).not.toContainText("华夏未触达");
+
+  await page.locator('[data-custodian-filter="huaxia"]').click();
+  const ccbCard = page.locator("#custodian-board .custodian-card", { hasText: "中国建设银行" });
+  const cmbCard = page.locator("#custodian-board .custodian-card", { hasText: "招商银行" });
+
+  await expect(ccbCard).toContainText("华夏托管 6");
+  await expect(ccbCard).toContainText("华夏行业配置股票型基金中基金(FOF-LOF)");
+  await expect(ccbCard).toContainText("88.9 亿");
+  await expect(cmbCard).toContainText("华夏托管 8");
+  await expect(cmbCard).toContainText("31.9 亿");
+  await expect(page.locator("#custodian-table thead")).toContainText("画像存量规模(亿元)");
+  await expect(page.locator("#custodian-table thead")).toContainText("成立募集规模(亿元)");
+});

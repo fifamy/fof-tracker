@@ -8,7 +8,7 @@
       name="description"
       content="跟踪全市场公募FOF的申报、受理、获批、发行、成立情况，并支持重点基金公司竞争格局观察。"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260827-scale0630" />
+    <link rel="stylesheet" href="./styles.css?v=20260828-custodian" />
   </head>
   <body>
     <div class="shell">
@@ -60,7 +60,7 @@
                 <button class="tab" data-tab="pipeline" role="tab" aria-selected="false">流程跟踪</button>
                 <button class="tab" data-tab="market" role="tab" aria-selected="false">公司格局</button>
                 <button class="tab" data-tab="scale" role="tab" aria-selected="false">存量与追赶</button>
-                <button class="tab" data-tab="custodian" role="tab" aria-selected="false">托管行渠道</button>
+                <button class="tab" data-tab="custodian" role="tab" aria-selected="false">托管行统计</button>
                 <button class="tab" data-tab="intel" role="tab" aria-selected="false">智能简报</button>
                 <button class="tab" data-tab="detail" role="tab" aria-selected="false">产品详情</button>
               </div>
@@ -378,7 +378,7 @@
           </section>
 
           <!-- ============================================================
-               托管行渠道（独立模块）
+               托管行统计（独立模块）
                ============================================================ -->
           <section class="panel" id="panel-custodian">
             <div class="inline-actions">
@@ -395,8 +395,8 @@
             <section class="card">
               <div class="section-head">
                 <div>
-                  <h2>托管行渠道概览</h2>
-                  <p>按托管行（≈代销主渠道）汇总在审 / 已成立 FOF，看头部银行偏好哪些基金公司、华夏在哪些行已经有合作。</p>
+                  <h2>托管行统计概览</h2>
+                  <p>按基金托管人汇总在途 / 已成立 FOF、基金管理人分布及规模，仅反映基金托管关系。</p>
                 </div>
                 <div class="subtabs" id="custodian-filter-tabs"></div>
               </div>
@@ -406,8 +406,8 @@
             <section class="card">
               <div class="section-head compact">
                 <div>
-                  <h2>渠道总表</h2>
-                  <p>所有披露过托管行的 FOF 按渠道维度展开，便于人工核对与导出。</p>
+                  <h2>托管机构总表</h2>
+                  <p>所有披露过基金托管人的 FOF 按托管机构展开，存量规模与募集规模分别列示。</p>
                 </div>
               </div>
               <div class="table-wrap" id="custodian-table"></div>
@@ -479,7 +479,7 @@
       <div class="drawer-body" id="drawer-content"></div>
     </aside>
 
-    <script src="./data/fof_tracker_snapshot.js?v=20260827-scale0630"></script>
-    <script src="./app.js?v=20260827-scale0630"></script>
+    <script src="./data/fof_tracker_snapshot.js?v=20260828-custodian"></script>
+    <script src="./app.js?v=20260828-custodian"></script>
   </body>
 </html>
